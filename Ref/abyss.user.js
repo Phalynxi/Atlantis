@@ -22,10 +22,7 @@ const AbyssColors = {
   EnemyBuildMark: "#cc5151",
 };
 
-if (
-  window.location.hostname === "localhost" ||
-  window.location.hostname === "127.0.0.1"
-) {
+if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
   const stripServerParam = () => {
     if (/(^|[?&])server=/.test(window.location.search || "")) {
       try {
@@ -1538,7 +1535,6 @@ const AB = {
                 { id: 13, name: "repeater crossbow", src: "crossbow_2" },
                 { id: 14, name: "mc grabby", src: "grab_1" },
                 { id: 15, name: "musket", src: "musket_1" },
-                { id: 16, name: "shotgun", src: "shotgun_1" },
               ];
             const cfg = Array.isArray(onChange?.[0]) ? onChange[0] : [];
             const idKey = cfg?.[0];
@@ -6361,6 +6357,7 @@ mStatus.style.cssText =
   const _sc = document.createElement("style");
   _sc.textContent = `
 .sizing { font-size: 15px; }
+#uehmod { position: fixed; left: 165px; bottom: 20px; width: 140px; padding: 8px; background-color: rgba(0, 0, 0, 0.25); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; }
 .stats-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
 .stats-label { color: #cfcfcf; }
 .stats-value { color: #ffffff; font-weight: 700; }
@@ -7424,65 +7421,146 @@ const Mod = {
       ];
     },
 
-    getAngles(id, amount) {
-      let item = items.list[player.items[id]];
+    getAngles(id, amount, aimAngle = null, arc = null) {
+      const item = items.list[player.items[id]];
       if (!item) return [];
-      let Result = [];
-      let nearObjects = liztobj.filter(
-        (e) => e.active && UTILS.getDistance(e, player, 0, 2) <= 400,
-      );
-      let angleNeeded = amount;
-      for (let i = 0; i < angleNeeded; i++) {
-        let base = i * ((Math.PI * 2) / angleNeeded);
-        let angle = base;
-        for (let j = 0; j < nearObjects.length; j++) {
-          let obj = nearObjects[j];
-          if (!obj) continue;
-          let extraAnglesmh = this.closestPossibleAngles(obj, id);
-          if (!extraAnglesmh) continue;
-          let best = extraAnglesmh[0];
-          if (extraAnglesmh.length > 1) {
-            let d0 = Math.abs(UTILS.getAngleDist(base, extraAnglesmh[0]));
-            let d1 = Math.abs(UTILS.getAngleDist(base, extraAnglesmh[1]));
-            best = d1 < d0 ? extraAnglesmh[1] : extraAnglesmh[0];
-          }
-          if (
-            Math.abs(UTILS.getAngleDist(base, best)) <
-            ((Math.PI * 2) / angleNeeded) * 0.6
-          ) {
-            angle = best;
-            break;
-          }
-        }
-        let tmpScale =
-          (player.scale || 35) + item.scale + (item.placeOffset || 0);
-        let tmp = {
-          x: player.x2 + Math.cos(angle) * tmpScale,
-          y: player.y2 + Math.sin(angle) * tmpScale,
-        };
-        if (
-          !objectManager.checkItemLocation(
-            tmp.x,
-            tmp.y,
-            item.scale,
-            0.6,
-            angle,
-            false,
-          )
-        ) {
-          continue;
-        }
-        Result.push(angle);
+      const PI2 = Math.PI * 2;
+
+      const px = player.x2;
+      const py = player.y2;
+      const placeRadius = (player.scale || 35) + item.scale + (item.placeOffset || 0);
+      const minAngleDiff = Math.min(0.55, Math.max(0.03, (2 * item.scale) / Math.max(1, placeRadius)));
+      const wantFill = (amount | 0) <= 0;
+      const useAim = typeof aimAngle === "number";
+      let width = useAim ? (typeof arc === "number" ? arc : item.dmg ? 1.8 : PI2) : PI2;
+      if (!(width > 0)) width = PI2;
+      if (width > PI2) width = PI2;
+      if (width < 0.12) width = 0.12;
+
+      const desired = wantFill ? 60 : Math.max(1, Math.min(60, amount | 0));
+
+      let ranges = null;
+      if (typeof traps?.ensureAngleRanges === "function") {
+        ranges = traps.ensureAngleRanges(id);
       }
-      return Result;
+      const norm = (a) => {
+        a %= PI2;
+        return a < 0 ? a + PI2 : a;
+      };
+      const inRanges = (a) => {
+        if (!ranges || !ranges.length) return true;
+        for (let i = 0; i < ranges.length; i++) {
+          const r = ranges[i];
+          const s = r[0], e = r[1];
+          if (s <= e) {
+            if (a >= s && a <= e) return true;
+          } else {
+            if (a >= s || a <= e) return true;
+          }
+        }
+        return false;
+      };
+      const withinArc = (a) => {
+        if (!useAim) return true;
+        if (width >= PI2) return true;
+        const halfArc = width * 0.5;
+        return Math.abs(UTILS.getAngleDist(aimAngle, a)) <= halfArc + 0.002;
+      };
+      const micro = item.dmg ? 0.0038 : 0.0075;
+      const step = 0.01
+
+      const res = [];
+      const tryPush = (a) => {
+        a = norm(a);
+        if (!withinArc(a)) return false;
+        if (!inRanges(a) && typeof traps?.closeToAngle === "function" && ranges && ranges.length) {
+          const snapped = traps.closeToAngle(a, ranges);
+          if (snapped == null) return false;
+          a = norm(snapped);
+          if (!withinArc(a)) return false;
+        }
+        for (let i = 0; i < res.length; i++) {
+          if (Math.abs(UTILS.getAngleDist(res[i], a)) < minAngleDiff) return false;
+        }
+        const x = px + Math.cos(a) * placeRadius;
+        const y = py + Math.sin(a) * placeRadius;
+        if (typeof this.gpIntersects === "function" && this.gpIntersects(x, y, item.scale)) return false;
+        if (!objectManager.checkItemLocation(x, y, item.scale, 0.6, item.id, false, player)) return false;
+        res.push(a);
+        return true;
+      };
+      const pushWithMicro = (a) => {
+        if (tryPush(a)) return true;
+        for (let k = 1; k <= 3; k++) {
+          if (tryPush(a + micro * k)) return true;
+          if (tryPush(a - micro * k)) return true;
+        }
+        return false;
+      };
+
+      if (useAim) {
+        pushWithMicro(aimAngle);
+        const halfArc = width * 0.5;
+        const maxI = Math.min(320, Math.max(10, Math.ceil((halfArc + 0.001) / step)));
+        for (let i = 1; i <= maxI && res.length < desired; i++) {
+          const off = i * step;
+          pushWithMicro(aimAngle + off);
+          if (res.length >= desired) break;
+          pushWithMicro(aimAngle - off);
+        }
+        if (res.length < Math.min(4, desired) && width < PI2) {
+          width = PI2;
+          const maxI2 = Math.min(420, Math.max(24, Math.ceil((Math.PI + 0.001) / step)));
+          for (let i = 1; i <= maxI2 && res.length < desired; i++) {
+            const off = i * step;
+            pushWithMicro(aimAngle + off);
+            if (res.length >= desired) break;
+            pushWithMicro(aimAngle - off);
+          }
+        }
+      } else {
+        const maxI = Math.min(700, Math.max(24, Math.ceil(PI2 / step)));
+        for (let i = 0; i < maxI && res.length < desired; i++) {
+          pushWithMicro(i * step);
+        }
+      }
+
+      if (res.length < desired) {
+        const fillStep = Math.max(0.02, minAngleDiff * 0.66);
+        const fillRange = (start, end) => {
+          if (!(fillStep > 0)) return;
+          if (start <= end) {
+            for (let a = start; a <= end && res.length < desired; a += fillStep) {
+              pushWithMicro(a);
+            }
+          } else {
+            for (let a = start; a <= PI2 && res.length < desired; a += fillStep) {
+              pushWithMicro(a);
+            }
+            for (let a = 0; a <= end && res.length < desired; a += fillStep) {
+              pushWithMicro(a);
+            }
+          }
+        };
+
+        if (ranges && ranges.length) {
+          for (let i = 0; i < ranges.length && res.length < desired; i++) {
+            fillRange(norm(ranges[i][0]), norm(ranges[i][1]));
+          }
+        } else {
+          fillRange(0, PI2);
+        }
+      }
+
+      return res;
     },
 
-    placeAround(id, amount = 16) {
+    placeAround(id, amount = 0) {
       if (!id || !player.items[id]) return;
       const angles = this.getAngles(id, amount);
       if (!angles) return;
       for (let i = 0; i < angles.length; i++) {
-        this.testCanPlace(id, 0, 0, 0, angles[i], false, false);
+        place(id, angles[i], 1);
       }
     },
 
@@ -7492,13 +7570,37 @@ const Mod = {
       const cos = Math.cos;
       const sin = Math.sin;
       try {
+        if (typeof first === "number" && typeof repeat === "boolean" && radian === undefined) {
+          yaboi = plus;
+          replacer = repeat;
+          radian = first;
+          first = -PI / 2;
+          repeat = PI / 2;
+          plus = PI / 18;
+        }
         if (first === undefined) first = -PI / 2;
         if (repeat === undefined) repeat = PI / 2;
         if (plus === undefined) plus = PI / 18;
         let item = items.list[player.items[id]];
         if (!item) return;
         let tmpS = player.scale + item.scale + (item.placeOffset || 0);
-        let counts = { attempts: 0, placed: 0 };
+        if (!this.placeCooldowns) this.placeCooldowns = new Map();
+        if (!this.placeCooldownsPending) this.placeCooldownsPending = new Map();
+        const now = Date.now();
+        if (this.placeCooldowns.size > 2000) {
+          for (const [k, v] of this.placeCooldowns) {
+            if (v <= now) this.placeCooldowns.delete(k);
+            if (this.placeCooldowns.size <= 1500) break;
+          }
+        }
+        if (this.placeCooldownsPending.size > 2000) {
+          for (const [k, v] of this.placeCooldownsPending) {
+            if (v <= now) this.placeCooldownsPending.delete(k);
+            if (this.placeCooldownsPending.size <= 1500) break;
+          }
+        }
+        const getKey = (x, y) => `${item.id}|${x.toFixed(3)}|${y.toFixed(3)}`;
+        let counts = { attempts: 0, placed: 0, placedAny: 0 };
         let tmpObjects = [];
 
         liztobj.forEach((p) => {
@@ -7526,14 +7628,10 @@ const Mod = {
           let relAim = radian + i;
           let tmpX = player.x2 + tmpS * cos(relAim);
           let tmpY = player.y2 + tmpS * sin(relAim);
-          const tryPlaceSlot = (slotId) => {
-            const itemId = player.items[slotId];
-            if (itemId == null) return false;
-            if (this._isPlacementBlocked(itemId, tmpX, tmpY)) return false;
-            place(slotId, relAim, 1);
-            this._schedulePlacementCheck(slotId, tmpX, tmpY);
-            return true;
-          };
+          let key = getKey(tmpX, tmpY);
+          let cooldownUntil = this.placeCooldowns.get(key) || 0;
+          if (cooldownUntil > now) continue;
+          if (cooldownUntil) this.placeCooldowns.delete(key);
           let cantPlace = tmpObjects.find(
             (tmp) =>
               tmp.active &&
@@ -7549,65 +7647,325 @@ const Mod = {
           )
             continue;
 
-          let placed = false;
           if (!replacer && yaboi) {
             if (yaboi.inTrap) {
               if (UTILS.getAngleDist(near.aim2 + PI, relAim + PI) <= PI * 1.3) {
-                placed = tryPlaceSlot(2);
+                this.placeCooldowns.set(key, Date.now() + 350);
+                place(2, relAim, 1);
+                counts.placedAny++;
               } else {
-                if (player.items[4] === 15) placed = tryPlaceSlot(4);
+                this.placeCooldowns.set(key, Date.now() + 350);
+                if (player.items[4] === 15) {
+                  place(4, relAim, 1);
+                  counts.placedAny++;
+                }
               }
             } else {
               if (
                 UTILS.getAngleDist(near.aim2, relAim) <=
                 config.gatherAngle / 2.6
               ) {
-                placed = tryPlaceSlot(2);
+                this.placeCooldowns.set(key, Date.now() + 350);
+                place(2, relAim, 1);
+                counts.placedAny++;
               } else {
-                if (player.items[4] === 15) placed = tryPlaceSlot(4);
+                this.placeCooldowns.set(key, Date.now() + 350);
+                if (player.items[4] === 15) {
+                  place(4, relAim, 1);
+                  counts.placedAny++;
+                }
               }
             }
           } else {
-            placed = tryPlaceSlot(id);
+            this.placeCooldowns.set(key, Date.now() + 350);
+            place(id, relAim, 1);
+            counts.placedAny++;
           }
 
-          if (placed) {
-            tmpObjects.push({
-              x: tmpX,
-              y: tmpY,
-              active: true,
-              blocker: item.blocker,
-              scale: item.scale,
-              isItem: true,
-              type: null,
-              colDiv: item.colDiv,
-              getScale: function () {
-                return this.scale;
-              },
-            });
-
-            if (UTILS.getAngleDist(near.aim2, relAim) <= 1) counts.placed++;
+          const checkX = tmpX;
+          const checkY = tmpY;
+          const checkKey = key;
+          const checkRadius = (item.scale || 0) + 8;
+          const pendingUntil = this.placeCooldownsPending.get(checkKey) || 0;
+          if (pendingUntil <= now) {
+            const ping = window.pingTime ?? window.ping ?? 0;
+            const checkDelay = Math.min(800, Math.max(180, 160 + ping * 1.2));
+            this.placeCooldownsPending.set(checkKey, now + checkDelay + 50);
+            setTimeout(() => {
+              try {
+                if (!this.placeCooldownsPending) return;
+                this.placeCooldownsPending.delete(checkKey);
+                const ownerSid = player?.sid;
+                let found = liztobj.some(
+                  (o) =>
+                    o &&
+                    o.active &&
+                    o.isItem &&
+                    o.id === item.id &&
+                    (!ownerSid || (o.owner && o.owner.sid === ownerSid)) &&
+                    UTILS.getDistance(checkX, checkY, o.x, o.y) < checkRadius,
+                );
+                if (!this.placeCooldowns) return;
+                if (found) {
+                  if (this.placeCooldowns.get(checkKey)) this.placeCooldowns.delete(checkKey);
+                } else {
+                  this.placeCooldowns.set(checkKey, Date.now() + 3000);
+                }
+              } catch (err) { }
+            }, checkDelay);
           }
+
+          tmpObjects.push({
+            x: tmpX,
+            y: tmpY,
+            active: true,
+            blocker: item.blocker,
+            scale: item.scale,
+            isItem: true,
+            type: null,
+            colDiv: item.colDiv,
+            getScale: function () {
+              return this.scale;
+            },
+          });
+
+          if (UTILS.getAngleDist(near.aim2, relAim) <= 1) counts.placed++;
         }
 
-        if (counts.placed > 0 && replacer && item.dmg && configs.SpikeTick) {
-          if (
-            near.dist2 <=
-            items.weapons[player.weapons[0]].range + player.scale * 1.8
-          ) {
-            instaC.canSpikeTick = true;
-          }
-        }
       } catch (err) { }
+    },
+
+    gpPrune() {
+      if (!this.gpRecent) this.gpRecent = [];
+      const nowTick = game.tick || 0;
+      const nowMs = Date.now();
+      const keepTicks = 8;
+      const keepMs = 900;
+      this.gpRecent = this.gpRecent.filter((p) => {
+        if (!p) return false;
+        if (nowTick && p.t != null) return nowTick - p.t <= keepTicks;
+        return nowMs - (p.ms || 0) <= keepMs;
+      });
+    },
+
+    gpIntersects(x, y, s) {
+      if (!this.gpRecent || !this.gpRecent.length) return false;
+      const sx = x;
+      const sy = y;
+      const ss = s;
+      for (let i = 0; i < this.gpRecent.length; i++) {
+        const p = this.gpRecent[i];
+        const dx = sx - p.x;
+        const dy = sy - p.y;
+        const minD = ss + p.s;
+        if (dx * dx + dy * dy < minD * minD) return true;
+      }
+      return false;
+    },
+
+    gpMark(x, y, s, itemId) {
+      if (!this.gpRecent) this.gpRecent = [];
+      this.gpRecent.push({
+        x,
+        y,
+        s: s + 2,
+        id: itemId,
+        t: game.tick || 0,
+        ms: Date.now(),
+      });
+      if (this.gpRecent.length > 70) this.gpRecent.splice(0, this.gpRecent.length - 50);
+    },
+
+    autoPlace() {
+      if (!enemy.length || !near || instaC.ticking || traps.inTrap) return;
+
+      const PI = Math.PI;
+      const PI2 = PI * 2;
+      const { cos, sin, acos } = Math;
+
+      const trapSlot = Array.isArray(player.items) ? player.items.findIndex((v) => v === 15) : -1;
+      let spikeSlot = -1;
+      if (Array.isArray(player.items)) {
+        const spikePriorities = [9, 8, 7, 6];
+        for (let i = 0; i < spikePriorities.length; i++) {
+          const idx = player.items.indexOf(spikePriorities[i]);
+          if (idx !== -1) { spikeSlot = idx; break; }
+        }
+      }
+      if (trapSlot === -1 && spikeSlot === -1) return;
+
+      if (!this.preplaces) this.preplaces = this.rbPreplaces || [[], []];
+      if (!this.preplaces[0] || !this.preplaces[1]) this.preplaces = [[], []];
+      this.preplaces[0].length = 0;
+      this.preplaces[1].length = 0;
+      this.rbPreplaces = this.preplaces;
+      let didPlaceSpike = false;
+
+      const nearObjects = [];
+      for (let i = 0; i < liztobj.length; i++) {
+        const o = liztobj[i];
+        if (!o || !o.active) continue;
+        if (UTILS.getDist(o, player, 0, 2) <= 420) nearObjects.push(o);
+      }
+
+      const riverMid = config.mapScale / 2;
+      const riverMin = riverMid - config.riverWidth / 2;
+      const riverMax = riverMid + config.riverWidth / 2;
+
+      const createObj = (item, direct) => {
+        const preObj = {
+          id: item.id,
+          dir: direct,
+          scale: item.scale,
+          colDiv: item.colDiv,
+          getScale: function (sM, ig) {
+            return this.scale * (ig ? 1 : this.colDiv);
+          },
+        };
+        const tmpS = player.scale + preObj.scale + (item.placeOffset || 0);
+        preObj.x = player.x2 + tmpS * cos(preObj.dir);
+        preObj.y = player.y2 + tmpS * sin(preObj.dir);
+        return preObj;
+      };
+
+      const overlaps = (arr, p) =>
+        arr && arr.length ? arr.some((pos) => Math.hypot(pos.x - p.x, pos.y - p.y) < pos.scale + p.scale) : false;
+
+      const canPlaceHere = (p) => {
+        if (p.id !== 18 && p.y >= riverMin && p.y <= riverMax) return false;
+        return objectManager.checkItemLocation(p.x, p.y, p.scale, 0.6, p.id, false, player);
+      };
+
+      const radCalc = (obj, direct, item, strict) => {
+        let preObj = createObj(item, direct);
+        const objScale = (typeof obj.getScale === "function" ? obj.getScale(0.6, obj.isItem) : obj.scale) + 0.01;
+        const dist = Math.hypot(obj.x - preObj.x, obj.y - preObj.y);
+        const scale = objScale + preObj.scale;
+        const angles = [];
+
+        if (dist < scale) {
+          const calc = acos(dist / scale);
+          const sum = [calc, -calc];
+          for (let i = 0; i < sum.length; i++) {
+            const angle = direct + sum[i];
+            preObj = createObj(item, angle);
+            if (overlaps(this.preplaces[1], preObj)) continue;
+            if (overlaps(this.preplaces[0], preObj)) continue;
+            if (canPlaceHere(preObj)) {
+              angles.push(angle);
+              this.preplaces[1].push(preObj);
+            }
+          }
+        } else {
+          if (strict) return [];
+          preObj = createObj(item, direct);
+          if (overlaps(this.preplaces[1], preObj)) return [];
+          if (overlaps(this.preplaces[0], preObj)) return [];
+          if (canPlaceHere(preObj)) {
+            angles.push(direct);
+            this.preplaces[1].push(preObj);
+          }
+        }
+
+        return angles;
+      };
+
+      const autoPlaceCore = (type, id, id2, reason) => {
+        if (id == null || player.items?.[id] == null) return;
+        const item = items.list[player.items[id]];
+        if (!item) return;
+
+        const item2 = id2 != null && player.items?.[id2] != null ? items.list[player.items[id2]] : null;
+
+        if (type === 0) {
+          const radObjs = nearObjects;
+          if (radObjs.length) {
+            for (let i = 0; i < radObjs.length; i++) {
+              const obj = radObjs[i];
+              const direct = UTILS.getDir(obj, player, 0, 2);
+              let placeAngles = radCalc(obj, direct, item, false);
+              if (placeAngles.length) {
+                for (let k = 0; k < placeAngles.length; k++) place(id, placeAngles[k], 1);
+                if (item.dmg) didPlaceSpike = true;
+              } else if (item2) {
+                placeAngles = radCalc(obj, direct, item2, false);
+                if (placeAngles.length) {
+                  for (let k = 0; k < placeAngles.length; k++) place(id2, placeAngles[k], 1);
+                  if (item2.dmg) didPlaceSpike = true;
+                }
+              }
+            }
+          } else {
+            for (let i = 0; i < PI2; i += PI / 2) checkPlace(id, near.aim2 + i);
+          }
+          return;
+        }
+
+        if (type === 1) {
+          const wantTrap = !!item.trap;
+          const radObjs = nearObjects.filter((obj) => {
+            if (typeof obj.isTeamObject !== "function" || !obj.isTeamObject(player)) return false;
+            if (wantTrap ? !obj.dmg : !obj.trap) return false;
+            return UTILS.getDist(obj, near, 0, 2) < 500;
+          });
+
+          if (radObjs.length) {
+            for (let i = 0; i < radObjs.length; i++) {
+              const obj = radObjs[i];
+              const direct = UTILS.getDir(obj, player, 0, 2);
+              const placeAngles = radCalc(obj, direct, item, true);
+              if (placeAngles.length) {
+                for (let k = 0; k < placeAngles.length; k++) place(id, placeAngles[k], 1);
+                if (item.dmg) didPlaceSpike = true;
+              }
+            }
+          }
+
+          if (reason) {
+            autoPlaceCore(type, id2, id, false);
+          } else if (this.preplaces[1].length < 1) {
+            autoPlaceCore(0, id2, id);
+          }
+        }
+      };
+
+      const dist2 = near.dist2 ?? UTILS.getDist(player, near, 0, 2);
+      if (my.autoPush) {
+        if (dist2 <= 169) autoPlaceCore(0, spikeSlot, trapSlot);
+        else if (dist2 > 222) autoPlaceCore(0, trapSlot, spikeSlot);
+      } else {
+        if (dist2 <= 222) {
+          if (near.inTrap) autoPlaceCore(0, spikeSlot, trapSlot);
+          else if (near.escaped) autoPlaceCore(0, trapSlot, spikeSlot);
+          else autoPlaceCore(1, spikeSlot, trapSlot, true);
+        } else {
+          if (dist2 > 269 && dist2 < 400) autoPlaceCore(0, trapSlot, spikeSlot);
+          else if (dist2 <= 269) autoPlaceCore(1, trapSlot, spikeSlot, true);
+        }
+      }
+
+      if (
+        didPlaceSpike &&
+        configs.SpikeTick &&
+        !instaC.isTrue &&
+        near &&
+        typeof near.dist2 === "number"
+      ) {
+        const w0 = player?.weapons?.[0];
+        const wRange = w0 != null ? (items.weapons?.[w0]?.range || 0) : 0;
+        if (near.dist2 <= wRange + (player.scale || 0) * 1.8 + 10) {
+          instaC.canSpikeTick = true;
+        }
+      }
     },
 
     checkSpikeTick() {
       try {
-        if (!near || ![3, 4, 5].includes(near.primaryIndex)) return false;
+        if (![3, 4, 5].includes(near.primaryIndex)) return false;
         if (
           my.autoPush
             ? false
-            : near.primaryIndex == null
+            : near.primaryIndex == undefined
               ? true
               : near.reloads[near.primaryIndex] > game.tickRate
         )
@@ -7619,7 +7977,12 @@ const Mod = {
           let item = items.list[9];
           let tmpS = near.scale + item.scale + (item.placeOffset || 0);
           let danger = 0;
-          for (let i = -1; i <= 1; i += 0.1) {
+          let counts = {
+            attempts: 0,
+            block: `unblocked`,
+          };
+          for (let i = -1; i <= 1; i += 1 / 10) {
+            counts.attempts++;
             let relAim = UTILS.getDir(player, near, 2, 2) + i;
             let tmpX = near.x2 + tmpS * Math.cos(relAim);
             let tmpY = near.y2 + tmpS * Math.sin(relAim);
@@ -7637,6 +8000,7 @@ const Mod = {
             )
               continue;
             danger++;
+            counts.block = `blocked`;
             break;
           }
           if (danger && near.dist2 <= 300) {
@@ -7651,125 +8015,29 @@ const Mod = {
       return false;
     },
 
-    autoPlace() {
-      if (!enemy.length || !configs.AutoPlace || instaC.ticking || !near)
-        return;
-      if (traps.inTrap) return;
-
-      const tickInterval = Math.max(1, AB.Menu.autoPlaceTick || 1);
-      if (game.tick % tickInterval !== 0) return;
-
-      const PI = Math.PI;
-      const PI2 = PI * 2;
-
-      if (gameObjects.length) {
-        let near2 = { inTrap: false };
-        let nearTrap = gameObjects
-          .filter(
-            (e) =>
-              e.trap &&
-              e.active &&
-              e.isTeamObject(player) &&
-              UTILS.getDist(e, near, 0, 2) <= near.scale + e.getScale() + 5,
-          )
-          .sort(
-            (a, b) =>
-              UTILS.getDist(a, near, 0, 2) - UTILS.getDist(b, near, 0, 2),
-          )[0];
-        if (nearTrap) near2.inTrap = true;
-
-        if (near.dist3 <= 450) {
-          if (near.dist3 <= 200) {
-            this.testCanPlace(4, 0, PI2, PI / 24, near.aim2, 0, {
-              inTrap: near2.inTrap,
-            });
-          } else {
-            player.items[4] === 15 &&
-              this.testCanPlace(4, 0, PI2, PI / 24, near.aim2);
-          }
-        }
-      } else {
-        if (near.dist3 <= 450) {
-          player.items[4] === 15 &&
-            this.testCanPlace(4, 0, PI2, PI / 24, near.aim2);
-        }
-      }
-    },
-
     replacer(findObj) {
-      if (!findObj || !configs.autoReplace || !inGame || traps.antiTrapped)
+      if (!findObj || !near || !player || !player.alive) return;
+      const objDist = UTILS.getDist(findObj, player, 0, 2);
+      const objAim = UTILS.getDir(findObj, player, 0, 2);
+      const isEnemyTrap = findObj.trap && !findObj.isTeamObject(player);
+      if (isEnemyTrap && traps.justOutTrap) {
+        traps.lastBrokenObj = findObj;
+        if (player.y2 >= config.mapScale - config.snowBiomeTop) buyEquip(22, 0);
+        else buyEquip(6, 21);
+        this.testCanPlace(2);
         return;
-
-      const PI = Math.PI;
-      const PI2 = PI * 2;
-
-      const sid = findObj.sid ?? findObj.id ?? 0;
-      const now = Date.now();
-      const state = this._replaceSpam.get(sid) || { last: 0, retryDone: false };
-      const afterBreak = !findObj.active || findObj.health <= 0;
-      if (now - state.last < 120 && !afterBreak) return;
-      state.last = now;
-      this._replaceSpam.set(sid, state);
-
-      let predictedDamage = 0;
-      for (let i = 0; i < players.length; i++) {
-        predictedDamage += this.getPotentialDamage(findObj, players[i]);
       }
-      const baseDmg = items.weapons[player.weapons[0]]?.dmg || 0;
-      const shouldSpam =
-        predictedDamage > 0 &&
-        findObj.health - predictedDamage <= baseDmg * 0.8 + 5;
-
-      const attemptReplace = () => {
-        let objDst = UTILS.getDist(findObj, player, 0, 2);
-        let perfectAngle =
-          Math.round(
-            Math.atan2(findObj.y - player.y2, findObj.x - player.x2) / (PI / 2),
-          ) *
-          (PI / 2);
-
-        if (
-          AB.Menu.weaponGrind &&
-          objDst <= items.weapons[player.weaponIndex].range + player.scale
-        )
-          return;
-
-        if (objDst <= 300 && near && near.dist2 <= 400) {
-          let danger = this.checkSpikeTick();
-          if (
-            !danger &&
-            near.dist2 <=
-            items.weapons[near.primaryIndex || 5].range + near.scale * 1.8
-          ) {
-            this.testCanPlace(2, 0, PI2, PI / 24, perfectAngle, 1);
-          } else {
-            if (player.items[4] === 15) {
-              this.testCanPlace(
-                near.dist2 > 250 ? 4 : 2,
-                0,
-                PI2,
-                PI / 24,
-                perfectAngle,
-                1,
-              );
-            }
-          }
-          traps.replaced = true;
+      if (objDist <= 300 && near && near.dist2 <= 400) {
+        const danger = traps.checkSpikeTick();
+        const useTraps = danger && player.items[4] === 15 && near.dist2 > 200;
+        if (useTraps) {
+          this.testCanPlace(4, 0, Math.PI * 2, Math.PI / 18, objAim, true);
+        } else {
+          this.testCanPlace(2);
         }
-      };
-
-      attemptReplace();
-      game.tickBase(() => {
-        attemptReplace();
-        if (shouldSpam || (afterBreak && !state.retryDone)) {
-          state.retryDone = true;
-          this._replaceSpam.set(sid, state);
-          game.tickBase(() => {
-            attemptReplace();
-          }, 1);
-        }
-      }, 1);
-    },
+        traps.replaced = true;
+      }
+    }
   },
 
   Heal: {
@@ -8931,9 +9199,11 @@ const Mod = {
     }
 
     if (
+      AB.Menu.TickMenu &&
       !traps.inTrap &&
       enemy.length &&
-      !instaC.isTrue
+      !instaC.isTrue &&
+      !(this.AutoPlay && this.AutoPlay.holdingSpikePos)
     ) {
       if (AB.Menu.AutoOneTick) {
         instaC.autoOneTickType();
@@ -9190,6 +9460,6581 @@ let waterPlus = 0;
 let dayNightTime = 0.25;
 let dayNightCycleMs = 180000;
 let sunLightLevel = 1;
+
+const musicTracks = [
+  {
+    name: "Scorpions - Still Loving You",
+    url: "https://www.youtube.com/watch?v=7pOr3dBFAeY",
+    lyrics: [
+      [22088, `Time`],
+      [24447, `It needs time`],
+      [27005, `To win back your love again`],
+      [30752, `I will be there`],
+      [35583, `I will be there`],
+      [41489, `Love`],
+      [43425, `Only love`],
+      [45825, `Can bring back your love`],
+      [46825, `someday`],
+      [49792, `I will be there`],
+      [54396, `I will be there`],
+      [82718, `Fight`],
+      [84764, `Babe, I'll fight`],
+      [87201, `To win back your love again`],
+      [111170, `I will be there`],
+      [115837, `I will be there`],
+      [121718, `Love`],
+      [123544, `Only love`],
+      [126112, `Can bring down the wall`],
+      [127112, `someday`],
+      [130016, `I will be there`],
+      [134598, `I will be there`],
+      [141333, `If we'd go again`],
+      [144890, `All the way from the start`],
+      [150547, `I would try to change`],
+      [154197, `The things that killed our`],
+      [155197, `love`],
+      [159590, `Pride has built a wall, so`],
+      [160590, `strong`],
+      [164032, `That I can't get through`],
+      [166490, `Is there really no chance`],
+      [171609, `To start once again?`],
+      [174867, `I'm loving you`],
+      [178687, `Try`],
+      [180707, `Baby, try`],
+      [183204, `To trust in my love again`],
+      [187096, `I will be there`],
+      [191668, `I will be there`],
+      [196996, `Love`],
+      [199212, `Our love`],
+      [201623, `Just shouldn't be thrown`],
+      [202623, `away`],
+      [205401, `I will be there`],
+      [209871, `I will be there`],
+      [216658, `If we'd go again`],
+      [220151, `All the way from the start`],
+      [225644, `I would try to change`],
+      [229000, `The things that killed our`],
+      [230000, `love`],
+      [234372, `Pride has built a wall, so`],
+      [235372, `strong`],
+      [238802, `That I can't get through`],
+      [241281, `Is there really no chance`],
+      [246215, `To start once again?`],
+      [252074, `If we'd go again`],
+      [255432, `All the way from the start`],
+      [260895, `I would try to change`],
+      [264210, `The things that killed our`],
+      [265210, `love`],
+      [269214, `Yes, I've hurt your pride`],
+      [270214, `and I know`],
+      [273703, `What you've been through`],
+      [276164, `You should give me a chance`],
+      [281189, `This can't be the end`],
+      [284245, `I'm still loving you`],
+      [292961, `I'm still loving you`],
+      [301519, `I'm still loving you`],
+      [308104, `I need your love`],
+      [310199, `I'm still loving you`],
+      [315936, `Still loving you, baby`],
+      [318910, `Hoo!`],
+      [335028, `I'm still loving you`],
+      [341604, `I need your love`],
+      [343695, `I'm still loving you`],
+      [349940, `I need your love`],
+      [352118, `Hoo!`],
+      [358181, `I need your love`],
+    ],
+  },
+  {
+    name: "Vizzen & Protolizard - Heaven Knows",
+    url: "https://ncs.io/track/download/a75d47db-0083-4548-8487-d72fc572dd73",
+    lyrics: [
+      [18326, "What does it mean to be"],
+      [19226, "happy?"],
+      [20996, "'Cause it looks like we all"],
+      [21896, "don't know"],
+      [23802, "Glass half full or empty"],
+      [26635, "Man, we're just putting on"],
+      [27535, "a show"],
+      [29643, "Try to look to the heavens"],
+      [32009, "To tell us things that we"],
+      [32909, "beg to know"],
+      [35134, "Like what did this all"],
+      [36034, "mean, if there's no"],
+      [36934, "tomorrow"],
+      [40167, "Oh, you know I tried to"],
+      [41067, "find a purpose in my life"],
+      [46490, "To drive me, to guard me"],
+      [48602, "Oh doctor, I feel dead"],
+      [49402, "inside"],
+      [71346, "To drive me, to guard me"],
+      [73929, "Oh doctor, I feel dead"],
+      [74729, "ins-"],
+      [114292, "Try to look to the heavens"],
+      [116913, "To tell us things that we"],
+      [117813, "beg to know"],
+      [120234, "Like what did this all"],
+      [121134, "mean, if there's no"],
+      [122034, "tomorrow"],
+      [136160, "Oh, you know I tried to"],
+      [137060, "find a purpose in my life"],
+      [141950, "To drive me, to guard me"],
+      [144217, "Oh doctor, I feel dead"],
+      [145017, "inside"],
+    ],
+  },
+  {
+    name: "Guns N' Roses - November Rain",
+    url: "https://www.youtube.com/watch?v=8x23ajWSHyo",
+    lyrics: [
+      [74160, `When I look into your eyes`],
+      [77850, `I can see a love restrained`],
+      [87300, `But darling, when I hold you`],
+      [90190, `Don't you know I feel the same?`],
+      [94860, `Yeah`],
+      [99930, `Nothing lasts forever`],
+      [102560, `And we both know hearts can`],
+      [103560, `change`],
+      [111790, `And it's hard to hold a`],
+      [112790, `candle`],
+      [114930, `In the cold November rain`],
+      [124300, `We've been through this such`],
+      [125300, `a long, long time`],
+      [127330, `Just trying to kill the`],
+      [128330, `pain, oh yeah`],
+      [135340, `But lovers always come and`],
+      [136340, `lovers always go`],
+      [138350, `And no one's really sure who's`],
+      [139350, `letting go today`],
+      [144010, `Walking away`],
+      [147770, `If we could take the time to`],
+      [148770, `lay it on the line`],
+      [150690, `I could rest my head just`],
+      [151690, `knowing that you were mine`],
+      [156290, `All mine`],
+      [161400, `So if you want to love me`],
+      [164450, `Then darling, don't refrain`],
+      [173740, `Or I'll just end up walking`],
+      [176650, `In the cold November rain`],
+      [183930, `Do you need some time on`],
+      [184930, `your own?`],
+      [190080, `Do you need some time all`],
+      [191080, `alone?`],
+      [195740, `Ooh, everybody needs some`],
+      [196740, `time on their own`],
+      [201840, `Ooh, don't you know you need`],
+      [202840, `some time all alone?`],
+      [210030, `I know it's hard to keep an`],
+      [211030, `open heart`],
+      [215780, `When even friends seem out`],
+      [216780, `to harm you`],
+      [221990, `But if you could heal a`],
+      [222990, `broken heart`],
+      [227870, `Wouldn't time be out to`],
+      [228870, `charm you?`],
+      [231490, `Oh, oh, oh, oh, oh`],
+      [283570, `Sometimes I need some time`],
+      [284570, `on my own`],
+      [289890, `Sometimes I need some time`],
+      [290890, `all alone`],
+      [295470, `Ooh, everybody needs some`],
+      [296470, `time on their own`],
+      [301720, `Ooh, don't you know you need`],
+      [302720, `some time all alone?`],
+      [337790, `And when your fears subside`],
+      [340690, `And shadows still remain,`],
+      [341690, `oh yeah`],
+      [350060, `I know that you can love me`],
+      [352850, `When there's no one left to`],
+      [353850, `blame`],
+      [362040, `So never mind the darkness`],
+      [365160, `We still can find a way`],
+      [374180, `Nothing lasts forever`],
+      [376860, `Even cold November rain`],
+      [451300, `You're not the only one`],
+      [454100, `You're not the only one`],
+      [456550, `Don't you think that you`],
+      [457550, `need somebody?`],
+      [459250, `Don't you think that you`],
+      [460250, `need someone?`],
+      [461950, `Everybody needs somebody`],
+      [464480, `You're not the only one`],
+      [467160, `You're not the only one`],
+      [469840, `Don't you think that you`],
+      [470840, `need somebody?`],
+      [472610, `Don't you think that you`],
+      [473610, `need someone?`],
+      [475100, `Everybody needs somebody`],
+      [477710, `You're not the only one`],
+      [480320, `You're not the only one`],
+      [482970, `Don't you think that you`],
+      [483970, `need somebody?`],
+      [485490, `Don't you think that you`],
+      [486490, `need someone?`],
+      [488210, `Everybody needs somebody`],
+      [490810, `You're not the only one`],
+      [493260, `You're not the only one`],
+      [496030, `Don't you think that you`],
+      [497030, `need somebody?`],
+      [498780, `Don't you think that you`],
+      [499780, `need someone?`],
+      [501350, `Everybody needs somebody`]
+    ],
+  },
+  {
+    name: "Evanescence - Tourniquet",
+    url: "https://www.youtube.com/watch?v=sONn94Bc694",
+    lyrics: [
+      [40040, `I tried to kill the pain`],
+      [44480, `But only brought more`],
+      [45480, `(So much more)`],
+      [49440, `I lay dying`],
+      [51520, `And I'm pouring crimson`],
+      [52520, `regret and betrayal`],
+      [58860, `I'm dying, praying,`],
+      [59860, `bleeding and screaming`],
+      [68320, `Am I too lost to be saved`],
+      [72980, `Am I too lost?`],
+      [77620, `My God my tourniquet`],
+      [80940, `Return to me salvation`],
+      [87020, `My God my tourniquet`],
+      [90280, `Return to me salvation`],
+      [96440, `Do You remember me?`],
+      [101120, `Lost for so long`],
+      [105870, `Will You be on the`],
+      [106870, `other side?`],
+      [110320, `Or will You forget me?`],
+      [115260, `I'm dying, praying,`],
+      [116260, `bleeding and screaming`],
+      [124700, `Am I too lost to be saved`],
+      [129360, `Am I too lost?`],
+      [134060, `My God my tourniquet`],
+      [137320, `Return to me salvation`],
+      [143360, `My God my tourniquet`],
+      [146740, `Return to me salvation`],
+      [156280, `(Return to me salvation)`],
+      [169040, `(I want to die)`],
+      [171640, `My God my tourniquet`],
+      [174940, `Return to me salvation`],
+      [180940, `My God my tourniquet`],
+      [184300, `Return to me salvation`],
+      [190440, `My wounds cry for the grave`],
+      [194870, `My soul cries for`],
+      [195870, `deliverance`],
+      [199570, `Will I be denied Christ`],
+      [205070, `Tourniquet`],
+      [206540, `My suicide`],
+      [211920, `(Return to me salvation)`],
+      [221000, `(Return to me salvation)`]
+    ],
+  },
+  {
+    name: "Judas Priest - Painkiller",
+    url: "https://www.youtube.com/watch?v=kO_EdmtR5Ck",
+    lyrics: [
+      [26660, `Faster than a bullet`],
+      [29100, `Terrifying scream`],
+      [31250, `Enraged and full of anger`],
+      [33190, `He's half man and half`],
+      [34190, `machine`],
+      [35940, `Rides the Metal Monster`],
+      [38370, `Breathing smoke and fire`],
+      [40670, `Closing in with vengeance`],
+      [41670, `soaring high`],
+      [45310, `He`],
+      [46510, `Is`],
+      [47640, `The Painkiller`],
+      [49970, `This`],
+      [51140, `Is`],
+      [52250, `The Painkiller`],
+      [54440, `Planets devastated`],
+      [56910, `Mankind's on its knees`],
+      [59040, `A saviour comes from out the`],
+      [60040, `skies`],
+      [61280, `In answer to their pleas`],
+      [63630, `Through boiling clouds of`],
+      [64630, `thunder`],
+      [66200, `Blasting bolts of steel`],
+      [68650, `Evils going under deadly`],
+      [69650, `wheels`],
+      [73210, `He`],
+      [74380, `Is`],
+      [75450, `The Painkiller`],
+      [77870, `This`],
+      [79040, `Is`],
+      [80170, `The Painkiller`],
+      [101120, `Faster than a laser bullet`],
+      [105720, `Louder than an atom bomb`],
+      [110570, `Chromium-plated boiling`],
+      [111570, `metal`],
+      [115140, `Brighter than a thousand`],
+      [116140, `suns`],
+      [216370, `Flying high on rapture`],
+      [218640, `Stronger, free and brave`],
+      [220950, `Nevermore encaptured`],
+      [222700, `They've been brought back`],
+      [223700, `from the grave`],
+      [225430, `With mankind resurrected`],
+      [227710, `Forever to survive`],
+      [230090, `Returns from Armageddon to`],
+      [231090, `the skies`],
+      [234940, `He`],
+      [236070, `Is`],
+      [237150, `The Painkiller`],
+      [239660, `This`],
+      [240800, `Is`],
+      [241890, `The Painkiller`],
+      [244240, `Wings`],
+      [245450, `Of`],
+      [246560, `Steel`],
+      [247160, `Painkiller`],
+      [248860, `Deadly`],
+      [251200, `Wheels`],
+      [251850, `Painkiller`],
+      [281520, `He`],
+      [282570, `Is`],
+      [283720, `The Painkiller`],
+      [286140, `This`],
+      [287270, `Is`],
+      [288400, `The Painkiller`],
+      [290750, `He`],
+      [291910, `Is`],
+      [293060, `The Painkiller`],
+      [295390, `This`],
+      [296520, `Is`],
+      [297730, `The Painkiller`],
+      [300130, `Pain`],
+      [301210, `Pain`],
+      [302430, `Killer`],
+      [303530, `Killer`],
+      [304750, `Pain`],
+      [305850, `Pain`],
+      [307050, `Killer`],
+      [308170, `Killer`],
+      [323390, `Pain`],
+      [332810, `Can't`],
+      [334190, `Stop`],
+      [335540, `The Painkiller`],
+      [358000, `Pain`]
+    ],
+  },
+  {
+    name: "Eminem: Mockingbird",
+    url: "https://github.com/oe2735/music/raw/refs/heads/main/Eminem_-_Mockingbird_(Hydr0.org).mp3",
+    lyrics: [
+      [2500, `Yeah`],
+      [4660, `I know sometimes`],
+      [6069, `Things may not always make`],
+      [7694, `sense to you right now`],
+      [10280, `But hey`],
+      [11950, `What Daddy always tell you?`],
+      [13956, `Straighten up, little soldier`],
+      [16466, `Stiffen up that upper lip`],
+      [19223, `What you cryin' about?`],
+      [21145, `You got me`],
+      [22300, `Hailie, I know you`],
+      [22990, `miss your mom,`],
+      [23812, `and I know you miss your dad`],
+      [25230, `When I'm gone, but I'm tryin'`],
+      [26202, `to give you the life`],
+      [26988, `that I never had`],
+      [28300, `I can see you're sad,`],
+      [28992, `even when you smile,`],
+      [30016, `even when you laugh`],
+      [31106, `I can see it in your eyes,`],
+      [32590, `deep inside you wanna cry`],
+      [33960, `'Cause you're scared,`],
+      [34686, `I ain't there, Daddy's wit'`],
+      [35379, `you in your prayers`],
+      [36623, `No more cryin',`],
+      [37405, `wipe them tears,`],
+      [38246, `Daddys here no more nightmares`],
+      [39615, `We gon' pull together`],
+      [40569, `through it, we gon' do it`],
+      [41752, `Lainie, Uncles crazy, aint he?`],
+      [43044, `Yeah, but he loves you, girl,`],
+      [44353, `and you better know it`],
+      [45323, `We're all we got in this world`],
+      [46579, `when it spins, when it swirls`],
+      [48098, `When it whirls, when it twirls`],
+      [49552, `two little beautiful girls`],
+      [51028, `Lookin' puzzled, in a daze,`],
+      [52361, `I know it's confusin' you`],
+      [53903, `Daddy's always on the move,`],
+      [55245, `Mama's always on the news`],
+      [56575, `I try to keep you sheltered`],
+      [57715, `from it, but somehow it seems`],
+      [59082, `The harder that I try`],
+      [59969, `to do that, the more`],
+      [60864, `it backfires on me`],
+      [61833, `All the things growin' up`],
+      [63335, `as Daddy that he had to see`],
+      [64708, `Daddy don't want you to see,`],
+      [66154, `but you see just as`],
+      [67046, `much as he did`],
+      [67926, `We did not plan it to be`],
+      [68888, `this way, your mother and me`],
+      [70435, `But things have got`],
+      [71106, `so bad between us, I don't`],
+      [72044, `see us ever bein' together`],
+      [73793, `ever again, like we used to`],
+      [75468, `be when we was teenagers`],
+      [76593, `But then, of course,`],
+      [77523, `everything always happens`],
+      [78831, `for a reason, I guess it was`],
+      [80170, `never meant to be`],
+      [81453, `But it's just somethin we have`],
+      [82548, `no control over, and that's`],
+      [83668, `what destiny is`],
+      [84602, `But no more worries,`],
+      [86073, `rest your head and go to sleep`],
+      [87303, `Maybe one day we'll wake up`],
+      [88708, `and thisll all just be a dream`],
+      [90204, `Now hush, little baby,`],
+      [92111, `don't you cry`],
+      [93499, `Everything's gonna be alright`],
+      [94800, `Stiffen that upper lip up,`],
+      [96705, `little lady, I told ya`],
+      [98402, `Daddy's here to hold ya`],
+      [99801, `through the night`],
+      [101108, `I know Mommy's not here`],
+      [102407, `right now and we dont know why`],
+      [104610, `We feel how we feel inside`],
+      [106486, `It may seem a little`],
+      [107675, `crazy, pretty baby`],
+      [109571, `But I promise Mama's`],
+      [111158, `gon' be alright`],
+      [112282, `Heh, it's funny`],
+      [113205, `I remember back one year when`],
+      [114970, `Daddy had no money`],
+      [116155, `Mommy wrapped the Christmas`],
+      [116999, `presents up and stuck 'em`],
+      [118014, `under the tree and said`],
+      [119100, `some of 'em were from me cause`],
+      [120211, `Daddy couldn't buy 'em`],
+      [121540, `Ill never forget that Chrismas`],
+      [122940, `I sat up the whole night`],
+      [124229, `crying cause Daddy felt`],
+      [125658, `like a bum see Daddy had a job`],
+      [126494, `But his job was to keep the`],
+      [128128, `food on the table for`],
+      [129196, `you and Mom and at the time,`],
+      [131111, `every house that we lived in`],
+      [132514, `Either kept gettin`],
+      [133400, `broken into and robbed or`],
+      [134869, `shot up on the block`],
+      [136000, `And your Mom was savin'`],
+      [137162, `money for you in a jar`],
+      [138696, `Tryin to start a piggy bank`],
+      [139884, `for you so you could`],
+      [140750, `go to college`],
+      [141465, `Almost had a thousand dollars`],
+      [142736, `til someone broke in`],
+      [144261, `and stole it an I know it hurt`],
+      [145577, `so bad it broke`],
+      [146341, `your Mama's heart`],
+      [147420, `And it seemed like everything`],
+      [148366, `was just startin to fall apart`],
+      [150200, `Mom and Dad was arguin' a lot`],
+      [151856, `So Mama moved back on to`],
+      [153313, `Chalmers in the flat,`],
+      [154425, `one-bedroom apartment`],
+      [155880, `And Dad moved back to the`],
+      [157000, `other side of 8 Mile on Novara`],
+      [158457, `And that's when Daddy went`],
+      [159775, `to California with his CD`],
+      [161518, `And met Dr. Dre, and flew`],
+      [162489, `you and Mama out to see me`],
+      [164118, `But Daddy had to work,`],
+      [165668, `you and Mama had to leave me`],
+      [167119, `Then you started seein`],
+      [168026, `Daddy on the TV`],
+      [169041, `And Mama didn't like it`],
+      [170491, `And you and Lainie were`],
+      [171657, `too young to understand it`],
+      [172886, `Papa was a rolling stone,`],
+      [174245, `Mama developed a habit`],
+      [175658, `And it all happened too fast`],
+      [177078, `for either one o us to grab it`],
+      [178465, `I'm just sorry you were there`],
+      [179870, `an had to witness it firsthand`],
+      [181304, `'Cause all I ever wanted to do`],
+      [182669, `was just make you proud`],
+      [184025, `Now I'm sittin' in this`],
+      [185275, `empty house just reminiscin'`],
+      [187070, `Lookin' at your baby pictures,`],
+      [188546, `it just trips me out`],
+      [189473, `To see how much you both`],
+      [190526, `have grown, it's almost like`],
+      [191481, `you're sisters now`],
+      [192969, `Wow, guess you pretty much are`],
+      [194732, `and Daddy's still here`],
+      [195851, `Lainie, I'm talkin' to you too`],
+      [197500, `Daddy's still here`],
+      [198829, `I like the sound of that, yeah`],
+      [200125, `its got a ring to it, dont it?`],
+      [201722, `Shh, Mama's only gone`],
+      [203030, `for the moment`],
+      [203962, `Now hush, little baby,`],
+      [205482, `don't you cry`],
+      [207053, `Everything's gonna be alright`],
+      [208832, `Stiffen that upper lip up,`],
+      [210235, `little lady, I told ya`],
+      [211972, `Daddy's here to hold ya`],
+      [213332, `through the night`],
+      [214487, `I know Mommy's not here`],
+      [215875, `right now and we dont know why`],
+      [218281, `We feel how we feel inside`],
+      [220129, `It may seem a little`],
+      [221169, `crazy, pretty baby`],
+      [223155, `But I promise Mama's`],
+      [224627, `gon' be alright`],
+      [225865, `And if you ask me to, Daddy's`],
+      [227328, `gonna buy you a mockingbird`],
+      [229718, `I'ma give you the world`],
+      [231082, `I'ma buy a diamond ring`],
+      [233000, `for you, I'ma sing for you`],
+      [234532, `I'll do anything for you`],
+      [236016, `to see you smile`],
+      [237228, `And if that mockingbird don't`],
+      [238843, `sing and that ring don't shine`],
+      [240982, `I'ma break that birdie's neck`],
+      [242699, `I'll go back to the`],
+      [243868, `jeweler who sold it to ya`],
+      [245633, `And make him eat every carat,`],
+      [247342, `don't Fuck with Dad`],
+      [248564, `(Haha)`],
+    ],
+  },
+  {
+    name: "The Neighborhood: Sweater Weather",
+    url: "https://github.com/oe2735/music/raw/refs/heads/main/The_Neighboorhood_-_Sweater_Weather_(Hydr0.org).mp3",
+    lyrics: [
+      [20957, "And all I am is a man"],
+      [24559, "I want the world in my hands"],
+      [28200, "I hate the beach"],
+      [30535, "But I stand in California"],
+      [33901, "with my toes in the sand"],
+      [36100, "Use the sleeves of my sweater"],
+      [38119, "Let's have an adventure"],
+      [40288, "Head in the clouds"],
+      [41600, "but my gravity centered"],
+      [44140, "Touch my neck"],
+      [45844, "and I'll touch yours"],
+      [47931, "You in those little"],
+      [49358, "high waisted shorts, oh"],
+      [52969, "She knows what I think about"],
+      [55400, "And what I think about"],
+      [56800, "One love, two mouths"],
+      [58913, "One love, one house"],
+      [60607, "No shirt, no blouse"],
+      [62627, "Just us, you find out"],
+      [64384, "Nothing that I wouldn't wanna"],
+      [65400, "tell you about, no"],
+      [67000, "'Cause it's too cold"],
+      [71187, "For you here"],
+      [73917, "And now, so let me hold"],
+      [78878, "Both your hands in"],
+      [81500, "the holes of my sweater"],
+      [83666, "And if I may just take"],
+      [84600, "your breath away"],
+      [85633, "I don't mind if there's"],
+      [86521, "not much to say"],
+      [87546, "Sometimes the silence"],
+      [88333, "guides a mind"],
+      [89468, "To move to a place so far away"],
+      [91969, "The goosebumps start to raise"],
+      [93402, "The minute that my left hand"],
+      [94222, "meets your waist"],
+      [95900, "And then I watch your face"],
+      [97300, "Put my finger on your tongue"],
+      [98100, "'cause you love to taste, yeah"],
+      [100053, "These hearts adore, everyone"],
+      [101600, "the other beats hardest for"],
+      [103200, "Inside this place is warm"],
+      [105200, "Outside it starts to pour"],
+      [107945, "Coming down"],
+      [109001, "One love, two mouths"],
+      [111128, "One love, one house"],
+      [112974, "No shirt, no blouse"],
+      [114827, "Just us, you find out"],
+      [116573, "Nothing that I wouldn't wanna"],
+      [117363, "tell you about, no, no, no"],
+      [121456, "'Cause it's too cold"],
+      [125367, "For you here"],
+      [128136, "And now, so let me hold"],
+      [133068, "Both your hands in"],
+      [135730, "the holes of my sweater"],
+      [137000, "'Cause it's too cold"],
+      [141000, "For you here"],
+      [143643, "And now, so let me hold"],
+      [148544, "Both your hands in"],
+      [151275, "the holes of my sweater"],
+      [153503, "Whoa, whoa, whoa"],
+      [166200, "Whoa, whoa, whoa"],
+      [173900, "Whoa, whoa, whoa"],
+      [181651, "Whoa, whoa, whoa"],
+      [189360, "Whoa, whoa, whoa"],
+      [197069, "Whoa, whoa, whoa"],
+      [202500, "'Cause it's too cold"],
+      [206658, "For you here"],
+      [209372, "And now, so let me hold"],
+      [214380, "Both your hands in"],
+      [217034, "the holes of my sweater"],
+      [218300, "It's too cold"],
+      [222133, "For you here"],
+      [224871, "And now, let me hold"],
+      [229934, "Both your hands in"],
+      [232466, "the holes of my sweater"],
+      [235598, "And it's too cold,"],
+      [237606, "it's too cold"],
+      [240600, "The holes of my sweater"],
+    ],
+  },
+  {
+    name: "Eminem: Rap God",
+    url: "https://github.com/oe2735/music/raw/refs/heads/main/Eminem%20-%20Rap%20God%20(Explicit)%20%5BXbGs_qK2PQA%5D.mp3",
+    lyrics: [
+      [869, `Look,`],
+      [2000, `I was gonna go easy on`],
+      [2700, `you not to hurt your feelings`],
+      [4571, `But I'm only goin' to get`],
+      [6729, `this one chance`],
+      [9600, `Something's wrong,`],
+      [10300, `I can feel it`],
+      [11500, `Just a feelin' I've got, like`],
+      [14400, `somethings about to happen`],
+      [15885, `but I don't know what`],
+      [17674, `If that means what`],
+      [18369, `I think it means,`],
+      [19215, `we're in trouble, big trouble`],
+      [20924, `And if he is as bananas as you`],
+      [21858, `say, I'm not takin any chances`],
+      [24337, `ur just what the doc ordered`],
+      [25692, `I'm beginnin' to feel`],
+      [26904, `like a Rap God, Rap God`],
+      [28870, `All my people from the front`],
+      [30261, `to the back nod, back nod`],
+      [32046, `Now, who thinks their arms are`],
+      [33094, `long enough to slap box,`],
+      [34805, `slap box?`],
+      [35380, `They said I rap like a`],
+      [36093, `robot, so call me Rap-bot`],
+      [37624, `But for me to rap like a`],
+      [38500, `computer it mus be in my genes`],
+      [40059, `I got a laptop in`],
+      [40805, `my back pocket`],
+      [41681, `My pen'll go off when I`],
+      [42496, `half-cock it, got a fat knot`],
+      [43528, `from that rap profit`],
+      [44915, `Made a livin' and a killin off`],
+      [45748, `it, ever since Bill Clinton`],
+      [46998, `was still in office`],
+      [47873, `With Monica Lewinsky`],
+      [48595, `feelin' on his nut sack`],
+      [49858, `I'm an MC still as honest, but`],
+      [51014, `as rude and as`],
+      [51717, `indecent as all hell`],
+      [52606, `Syllables, skill-a-holic`],
+      [53804, `(kill 'em all with)`],
+      [54442, `This flippity dippity-hippity`],
+      [55162, `hip-hop, you dont really wanna`],
+      [56254, `get into a pissin' match`],
+      [57251, `With this rappity brat, packin`],
+      [58105, `a MAC in the back of the Ac',`],
+      [59491, `backpack rap crap,`],
+      [60298, `yap-yap, yackety-yack`],
+      [61261, `And at the exact same time, I`],
+      [62058, `attempt these lyrical acrobat`],
+      [63120, `stunts while im practicin that`],
+      [64296, `I'll still be able to break a`],
+      [65356, `Motherfucking table over the`],
+      [66025, `back of a couple of Faggots and`],
+      [66706, `crack it in half`],
+      [67499, `Only realized it was ironic, I`],
+      [68904, `was signed to aftermath`],
+      [70283, `after the fact`],
+      [71388, `How could I not blow?`],
+      [72231, `All I do is drop F-bombs,`],
+      [73299, `feel my wrath of attack`],
+      [74203, `Rappers are havin' a rough`],
+      [75074, `time period, here's a maxi pad`],
+      [76666, `It's actually disastrously bad`],
+      [78226, `for the wack while I'm`],
+      [79000, `masterfully constructin' this`],
+      [80222, `masterpiece`],
+      [80944, `'Cause I'm beginnin' to feel`],
+      [82017, `like a Rap God, Rap God`],
+      [84032, `All my people from the front`],
+      [85572, `to the back nod, back nod`],
+      [87142, `Now, who thinks their arms are`],
+      [88403, `long enough to slap box,`],
+      [89586, `slap box?`],
+      [90400, `Let me show u maintainin' this`],
+      [91696, `shit aint that hard, that hard`],
+      [93500, `Everybody want the key and the`],
+      [94455, `secret to rap immortality`],
+      [95700, `like I have got`],
+      [96890, `Well, to be truthful the`],
+      [97569, `blueprint's, simply rage and`],
+      [98765, `youthful exuberance`],
+      [99532, `Everybody loves to root for a`],
+      [100600, `nuisance, hit the Earth`],
+      [101500, `like an asteroid`],
+      [102105, `Did nothin' but shoot for`],
+      [103002, `the Moon since (pew)`],
+      [104200, `MCs get taken to school with`],
+      [105400, `this music 'cause I use it as`],
+      [106600, `a vehicle to, "Bus the rhyme"`],
+      [107898, `Now I lead a new school`],
+      [108634, `full of students`],
+      [109600, `Me? I'm a product of Rakim,`],
+      [110984, `Lakim Shabazz, 2Pac, N.W.A,`],
+      [113125, `Cube, hey Doc, Ren`],
+      [114341, `Yella, Eazy, thank you,`],
+      [115046, `they got Slim`],
+      [115797, `Inspired enough to one day`],
+      [117043, `grow up, blow up and`],
+      [117859, `be in a position`],
+      [119182, `To meet Run-D.M.C.,`],
+      [120060, `and induct them into`],
+      [120957, `the Motherfucking`],
+      [121683, `Rock n Roll Hall of Fame even`],
+      [123400, `though I'll walk in the church`],
+      [124400, `and burst in a ball of flames`],
+      [125700, `Only Hall of Fame I'll be`],
+      [126600, `inducted in is the alcohol of`],
+      [128108, `fame on the wall of (shame)`],
+      [129769, `You fags think it's all a game`],
+      [131300, `'til I walk a flock of flames`],
+      [133169, `Off a plank and, tell me what`],
+      [134400, `in the Fuck are you thinkin'?`],
+      [135892, `Little gay lookin' boy,`],
+      [136766, `so gay I can barely say it`],
+      [138058, `with a straight face,`],
+      [138700, `lookin' boy (haha)`],
+      [139400, `You're witnessin' a mass-occur`],
+      [140200, `like you're watchin' a church`],
+      [140800, `gatherin' take place,`],
+      [141826, `lookin' boy`],
+      [142800, `"Oy vey, that boy's gay",`],
+      [144300, `that's all they say,`],
+      [145100, `lookin' boy`],
+      [145750, `You get a thumbs up, pat on`],
+      [146500, `the back and a way to go from`],
+      [147600, `your label every day,`],
+      [148400, `lookin' boy`],
+      [149100, `Hey, lookin' boy,`],
+      [149700, `what you say, lookin' boy?`],
+      [150568, `I get a, hell yeah from Dre,`],
+      [151600, `lookin' boy`],
+      [152222, `I'ma work for everythin I have`],
+      [153600, `never asked nobody for shit,`],
+      [154569, `get outta my face, lookin' boy`],
+      [155500, `Basically, boy, you're never`],
+      [156217, `gonna be capable of keepin' up`],
+      [157541, `with the same pace,`],
+      [158120, `lookin' boy, 'cause`],
+      [158926, `I'm beginnin' to feel`],
+      [159869, `like a Rap God, Rap God`],
+      [161833, `All my people from the front`],
+      [163240, `to the back nod, back nod`],
+      [164998, `The way I'm racin' around the`],
+      [166100, `track, call me NASCAR, NASCAR`],
+      [168353, `Dale Earnhardt of the trailer`],
+      [169400, `park, the White Trash God`],
+      [170735, `Kneel before General Zod,`],
+      [172270, `this planet's Krypton,`],
+      [173131, `no, Asgard, Asgard`],
+      [174696, `So you'll be Thor,`],
+      [175589, `and I'll be Odin, you rodent,`],
+      [177098, `I'm omnipotent`],
+      [178400, `Let off, then I'm reloadin',`],
+      [179689, `immediately with these`],
+      [180700, `bombs I'm totin'`],
+      [181800, `And I should not be woken`],
+      [183200, `I'm the walkin' dead,`],
+      [183969, `but I'm just a talkin' head,`],
+      [185300, `a zombie floatin', but I got`],
+      [186900, `your mom deepthroating`],
+      [188030, `I'm out my Ramen Noodle, we`],
+      [189700, `have nothin' in common, poodle`],
+      [191142, `I'm a Doberman,`],
+      [191900, `pinch yourself in the arm`],
+      [192947, `and pay homage, pupil`],
+      [194603, `It's me, my honesty's brutal`],
+      [196940, `But it's honestly futile if I`],
+      [198600, `don't utilize what I do though`],
+      [200054, `For good, at least`],
+      [200844, `once in a while`],
+      [201495, `So I wanna make sure somewhere`],
+      [202500, `in this chicken scratch I`],
+      [203200, `scribble and doodle`],
+      [204052, `enough rhymes`],
+      [204750, `To maybe try to help get some`],
+      [205989, `people through tough times`],
+      [207200, `But I gotta keep a few`],
+      [207940, `punchlines just in case 'cause`],
+      [209300, `even you unsigned`],
+      [210200, `Rappers are hungry lookin'`],
+      [211269, `at me like it's lunchtime`],
+      [212800, `I know there was a time where`],
+      [213727, `once I was king of`],
+      [215000, `the underground`],
+      [215569, `But I still rap like I'm`],
+      [216269, `on my Pharoahe Monch grind`],
+      [217600, `So I crunch rhymes, but`],
+      [218652, `sometimes when you combine`],
+      [220169, `Appeal with the`],
+      [220700, `skin color of mine`],
+      [221765, `You get too big and here they`],
+      [222700, `come tryin' to censor`],
+      [223700, `you like that one line`],
+      [224800, `I said on, I'm back from`],
+      [225959, `The Mathers LP 1 when`],
+      [226969, `I tried to say I'll take seven`],
+      [228500, `kids from Columbine`],
+      [229996, `Put 'em all in a line, add an`],
+      [230900, `AK-47, a revolver and a .9`],
+      [233600, `See if I get away with it now`],
+      [234729, `that I ain't as big as I was,`],
+      [236100, `but I'm`],
+      [236747, `Morphin' into an immortal,`],
+      [238243, `comin' through the portal`],
+      [239259, `You're stuck in a time`],
+      [240150, `warp from 2004 though`],
+      [241570, `And I don't know what the`],
+      [242495, `Fuck that you rhyme for`],
+      [243700, `You're pointless as Rapunzel`],
+      [244801, `with Fuckin' cornrows`],
+      [246500, `You write normal?`],
+      [247159, `Fuck bein' normal`],
+      [248300, `And I just bought a new`],
+      [248822, `raygun from the future`],
+      [250061, `Just to come and shoot u, like`],
+      [251200, `when Fabolous made Ray J mad`],
+      [252681, `'Cause Fab said he looked like`],
+      [253570, `a fag at Mayweather's pad`],
+      [254347, `singin' to a man while`],
+      [255086, `he played piano`],
+      [256200, `Man, oh man, that was a 24-7`],
+      [257800, `special on the cable channel`],
+      [259427, `So Ray J went straight to the`],
+      [260300, `radio station, the very next`],
+      [261500, `day, "Hey Fab, I'ma kill you"`],
+      [263300, `Lyrics comin' at you at`],
+      [263974, `supersonic speed`],
+      [265269, `Uh, summa-lumma, dooma-lumma,`],
+      [266400, `you assumin' I'm a human`],
+      [267400, `What I gotta do to get it`],
+      [268012, `through to you? I'm superhuman`],
+      [268835, `Innovative and I'm made of`],
+      [269800, `rubber so that anythin you say`],
+      [270749, `is ricochetin' off of me, and`],
+      [271540, `it'll glue to you and I'm`],
+      [272192, `devastatin', more than ever`],
+      [273013, `demonstratin', how to give a`],
+      [273815, `Motherfuckin audience a feelin`],
+      [274623, `like it's levitatin'`],
+      [275527, `Never fadin' and I know the`],
+      [276240, `haters are forever waitin' for`],
+      [277200, `the day that they can say I`],
+      [277880, `fell off, theyll be celebratin`],
+      [278548, `Cause I know the way to get em`],
+      [279345, `motivated, I make elevatin'`],
+      [280300, `music, you make elevator music`],
+      [282083, `"Oh, hes too mainstream", well`],
+      [283404, `that's what they do when they`],
+      [284300, `get jealous, they confuse it`],
+      [285349, `"It's not hip-hop, it's pop"`],
+      [286795, `'cause I found a`],
+      [287479, `hella way to fuse it`],
+      [288601, `With rock, shock rap with Doc,`],
+      [290291, `throw on "Lose Yourself"`],
+      [290983, `and make 'em lose it`],
+      [291840, `I don't know how to make songs`],
+      [292759, `like that, I don't know`],
+      [293900, `what words to use`],
+      [295000, `Let me know when it occurs to`],
+      [295938, `you while I'm rippin' any one`],
+      [296842, `of these verses that versus u`],
+      [298032, `Its curtains, Im inadvertently`],
+      [299001, `hurtin' you, how many`],
+      [299832, `verses I gotta murder to`],
+      [301169, `Prove that if you were half as`],
+      [302346, `nice, your songs, you could`],
+      [303364, `sacrifice virgins too?`],
+      [304499, `Ugh, school flunky,`],
+      [306139, `pill junkie, but look at the`],
+      [307613, `accolades this skills brung me`],
+      [309365, `Full of myself,`],
+      [310078, `but still hungry`],
+      [311300, `I bully myself 'cause I make`],
+      [312340, `me do what I put my mind to`],
+      [314000, `And I'm a million leagues`],
+      [315700, `above you, ill when I`],
+      [316963, `speak in tongues`],
+      [317690, `But it's still`],
+      [318405, `tongue-in-cheek, Fuck you`],
+      [319299, `I'm drunk, so, Satan, take the`],
+      [321000, `Fucking wheel, I'ma sleep`],
+      [322100, `in the front seat`],
+      [322800, `Bumpin' Heavy D and the Boyz,`],
+      [324213, `still "Chunky but Funky"`],
+      [326081, `But in my head`],
+      [326818, `there's somethin' I can feel`],
+      [327900, `tuggin' and strugglin'`],
+      [329252, `Angels fight with devils and`],
+      [330867, `here's what they want from me`],
+      [332900, `They're askin' me to eliminate`],
+      [333900, `some of the women hate`],
+      [334700, `But if you take into`],
+      [335400, `consideration the bitter`],
+      [336213, `hatred I have, then you may be`],
+      [337300, `a little patient, and more`],
+      [338115, `sympathetic to the situation`],
+      [339588, `And understand the`],
+      [340207, `discrimination`],
+      [341700, `But Fuck it, life's handin you`],
+      [343240, `lemons? Make lemonade then`],
+      [344500, `But if I cant batter the women`],
+      [346000, `How the Fuck am I supposed`],
+      [346834, `to bake 'em a cake, then?`],
+      [348300, `Don't mistake him for Satan`],
+      [349285, `It's a fatal mistake if you`],
+      [350269, `think I need to be overseas`],
+      [351533, `and take a vacation`],
+      [352717, `To trip a broad, and make`],
+      [353800, `her fall on her face and`],
+      [355148, `Don't be a retard, be a king?`],
+      [356976, `Think not, why be a king`],
+      [359100, `when you can be a God?`],
+    ],
+  },
+  {
+    name: "The Kid Laroi: Stay",
+    url: "https://github.com/oe2735/music/raw/refs/heads/main/The%20Kid%20LAROI,%20Justin%20Bieber%20-%20STAY%20(Official%20Video)%20%5BkTJczUoc26U%5D.mp3",
+    lyrics: [
+      [30600, "I do the same"],
+      [31500, "thing I told you that"],
+      [32399, "I never would"],
+      [33325, "I told you I'd change,"],
+      [34347, "even when I knew I never could"],
+      [36018, "I know that I can't"],
+      [37133, "find nobody else as good as u"],
+      [38797, "I need you to stay,"],
+      [39822, "need you to stay, hey (oh)"],
+      [42100, "I get drunk,"],
+      [42869, "wake up,"],
+      [43755, "I'm wasted still"],
+      [44922, "I realize the time"],
+      [46235, "that I wasted here"],
+      [47700, "I feel like"],
+      [48511, "you can't feel the way I feel"],
+      [50479, "Oh, I'll be Fucked up"],
+      [51699, "if you can't be right here"],
+      [53128, "Oh, ooh-woah"],
+      [54500, "(oh, ooh-woah, ooh-woah)"],
+      [55948, "Oh, ooh-woah"],
+      [57416, "(oh, ooh-woah, ooh-woah)"],
+      [58774, "Oh, ooh-woah"],
+      [59900, "(oh, ooh-woah, ooh-woah)"],
+      [61387, "Oh, I'll be Fucked up"],
+      [62959, "if you can't be right here"],
+      [64384, "I do the same"],
+      [65500, "thing I told you that"],
+      [66141, "I never would"],
+      [67188, "I told you I'd change,"],
+      [68218, "even when I knew I never could"],
+      [69909, "I know that I can't"],
+      [70925, "find nobody else as good as u"],
+      [72730, "I need you to stay,"],
+      [73869, "need you to stay, hey"],
+      [75800, "I do the same"],
+      [76800, "thing I told you that"],
+      [77600, "I never would"],
+      [78467, "I told you I'd change,"],
+      [79539, "even when I knew I never could"],
+      [81217, "I know that I can't"],
+      [82353, "find nobody else as good as u"],
+      [84004, "I need you to stay,"],
+      [85260, "need you to stay, hey"],
+      [87106, "When I'm away from you,"],
+      [88438, "I miss your touch (ooh)"],
+      [90057, "You're the reason"],
+      [90762, "I believe in love"],
+      [92876, "It's been difficult"],
+      [93817, "for me to trust (ooh)"],
+      [95653, "And I'm afraid that"],
+      [96320, "I'ma Fuck it up"],
+      [98560, "Ain't no way"],
+      [99133, "that I can leave you stranded"],
+      [101364, "'Cause you ain't ever"],
+      [102100, "left me empty-handed"],
+      [104129, "And you know that I know that"],
+      [105810, "I can't live without you"],
+      [107823, "So, baby, stay"],
+      [109657, "Oh, ooh-woah"],
+      [111013, "(oh, ooh-woah, ooh-woah)"],
+      [112382, "Oh, ooh-woah"],
+      [113799, "(oh, ooh-woah, ooh-woah)"],
+      [115300, "Oh, ooh-woah"],
+      [116585, "(oh, ooh-woah, ooh-woah)"],
+      [117900, "I'll be Fucked up"],
+      [119500, "if you can't be right here"],
+      [120900, "I do the same"],
+      [121900, "thing I told you that"],
+      [122800, "I never would"],
+      [123535, "I told you I'd change,"],
+      [124625, "even when I knew I never could"],
+      [126351, "I know that I can't"],
+      [127624, "find nobody else as good as u"],
+      [129142, "I need you to stay,"],
+      [130318, "need you to stay, hey"],
+      [132319, "I do the same"],
+      [133150, "thing I told you that"],
+      [134000, "I never would"],
+      [134775, "I told you I'd change,"],
+      [135978, "even when I knew I never could"],
+      [137614, "I know that I can't"],
+      [138753, "find nobody else as good as u"],
+      [140407, "I need you to stay,"],
+      [141500, "need you to stay, hey"],
+      [148700, "Woah-oh"],
+      [151991, "I need you to stay,"],
+      [152856, "need you to stay, hey"],
+    ],
+  },
+  {
+    name: "The Weeknd: Blinding Lights",
+    url: "https://github.com/oe2735/music/raw/refs/heads/main/The_Weekend_-_Blinding_lights_(Hydr0.org).mp3",
+    lyrics: [
+      [13769, "Yeah"],
+      [27492, "I've been tryna call"],
+      [30043, "I've been on my own"],
+      [31269, "for long enough"],
+      [32800, "Maybe you can show me"],
+      [34169, "how to love, maybe"],
+      [38547, "I'm goin' through withdrawals"],
+      [41241, "You don't even have"],
+      [42242, "to do too much"],
+      [44119, "You can turn me on"],
+      [45082, "with just a touch, baby"],
+      [49691, "I look around and"],
+      [50693, "Sin City's cold and empty"],
+      [53121, "(oh)"],
+      [53705, "No one's around to judge me"],
+      [55880, "(oh)"],
+      [56304, "I can't see clearly"],
+      [57923, "when you're gone"],
+      [60842, "I said, ooh,"],
+      [63645, "I'm blinded by the lights"],
+      [66841, "No, I can't sleep until"],
+      [68631, "I feel your touch"],
+      [72172, "I said, ooh,"],
+      [75230, "I'm drowning in the night"],
+      [78004, "Oh, when I'm like this,"],
+      [79852, "you're the one I trust"],
+      [82123, "(Hey, hey, hey)"],
+      [94469, "I'm running out of time"],
+      [97366, "'Cause I can see the"],
+      [98220, "sun light up the sky"],
+      [100225, "So I hit the road"],
+      [101202, "in overdrive, baby, oh"],
+      [107000, "The city's cold and empty"],
+      [109269, "(oh)"],
+      [109807, "No one's around to judge me"],
+      [111900, "(oh)"],
+      [112512, "I can't see clearly"],
+      [114015, "when you're gone"],
+      [117000, "I said, ooh,"],
+      [120076, "I'm blinded by the lights"],
+      [122981, "No, I can't sleep until"],
+      [124924, "I feel your touch"],
+      [128169, "I said, ooh,"],
+      [131200, "I'm drowning in the night"],
+      [134146, "Oh, when I'm like this,"],
+      [136011, "you're the one I trust"],
+      [139600, "I'm just walking by to"],
+      [140696, "let you know"],
+      [141769, "(by to let you know)"],
+      [142300, "I could never say it"],
+      [143354, "on the phone"],
+      [144489, "(say it on the phone)"],
+      [145500, "Will never let you"],
+      [147000, "go this time"],
+      [150014, "(ooh)"],
+      [150696, "I said, ooh,"],
+      [153888, "I'm blinded by the lights"],
+      [156600, "No, I can't sleep until"],
+      [158606, "I feel your touch"],
+      [161000, "(Hey, hey, hey)"],
+      [172000, "(Hey, hey, hey)"],
+      [184369, "I said, ooh,"],
+      [187500, "I'm blinded by the lights"],
+      [190269, "No, I can't sleep until"],
+      [192304, "I feel your touch"],
+    ],
+  },
+  {
+    name: "The Walters: I Love You So",
+    url: "https://github.com/oe2735/music/raw/refs/heads/main/The_Walters_-_I_Love_You_So_(Hydr0.org).mp3",
+    lyrics: [
+      [1250, "I just need someone in my life"],
+      [3969, "to give it structure"],
+      [7200, "To handle all the selfish ways"],
+      [9369, "I'd spend my time without her"],
+      [13600, "You're everything I want,"],
+      [14953, "but I can't deal"],
+      [16533, "with all your lovers"],
+      [20151, "You're saying I'm the one,"],
+      [21507, "but it's your actions"],
+      [23234, "that speak louder"],
+      [26700, "Giving me love when you are"],
+      [28854, "down and need another"],
+      [32722, "I've gotta get away an"],
+      [34300, "let you go, Ive gotta get over"],
+      [38915, "But I love you so"],
+      [42756, "(ooh-ooh-ooh)"],
+      [45312, "I love you so (ooh-ooh-ooh)"],
+      [51631, "I love you so (ooh-ooh-ooh)"],
+      [57929, "I love you so"],
+      [62500, "I'm gonna pack my things"],
+      [65933, "and leave you behind"],
+      [68850, "This feeling's old,"],
+      [70642, "and I know that"],
+      [72567, "I've made up my mind"],
+      [75079, "I hope you feel what I felt"],
+      [78529, "when you shattered my soul"],
+      [81332, "'Cause you were cruel,"],
+      [83000, "and I'm a fool,"],
+      [85000, "so please, let me go"],
+      [89569, "But I love you so"],
+      [92745, "(please, let me go)"],
+      [95978, "I love you so"],
+      [99107, "(please, let me go)"],
+      [102223, "I love you so"],
+      [106295, "(please, let me go)"],
+      [108659, "I love you so"],
+      [118169, "Ooh-ooh-ooh"],
+      [124500, "Ooh-ooh-ooh-ooh"],
+      [130696, "Ooh-ooh-ooh"],
+      [137195, "Ooh-ooh-ooh-ooh"],
+    ],
+  },
+  {
+    name: "Edward Maya, ft. Vika Jigulina: Stereo Hearts",
+    url: "https://github.com/oe2735/music/raw/refs/heads/main/Edward_Maya_ft._Vika_Jigulina_-_Stereo_love_(Hydr0.org).mp3",
+    lyrics: [
+      [4200, "When you gonna stop"],
+      [5770, "breaking my heart?"],
+      [11700, "I don't wanna be another one"],
+      [19300, "Paying for the"],
+      [20400, "things I never done"],
+      [25969, "Don't let go,"],
+      [27573, "don't let go to my love"],
+      [49300, "I think I found the one"],
+      [51007, "that'll hold my heart"],
+      [56869, "I wanna feel your heart,"],
+      [58686, "we're in love tonight"],
+      [60500, "I can fix all those lies"],
+      [62860, "Oh baby, baby, I run,"],
+      [64568, "but I'm running to you"],
+      [66696, "You won't see me cry,"],
+      [68569, "I'm hiding inside"],
+      [70373, "My heart is in pain,"],
+      [72111, "but I'm smiling for you"],
+      [76000, "Can I get to your soul?"],
+      [77777, "Can you get to my flow?"],
+      [79696, "Can we promise we wont let go?"],
+      [83500, "All the things that I need,"],
+      [85469, "all the things that you need"],
+      [87168, "You can make it feel so real"],
+      [91022, "'Cause you can't deny,"],
+      [92708, "you've blown my mind"],
+      [94637, "When I touch your body,"],
+      [96430, "I feel I'm losing control"],
+      [98358, "'Cause you can't deny,"],
+      [100096, "you've blown my mind"],
+      [102162, "When I see you baby,"],
+      [103906, "I just don't wanna let go"],
+      [106752, "(Oohh)"],
+      [109942, "When you gonna stop"],
+      [111609, "breaking my heart?"],
+      [117469, "I don't wanna be another one"],
+      [139966, "I think I found the one"],
+      [141800, "that'll hold my heart"],
+      [147606, "I wanna feel your heart,"],
+      [149379, "we're in love tonight"],
+      [151169, "I can fix all those lies"],
+      [153526, "Oh baby, baby, I run,"],
+      [155288, "but I'm running to you"],
+      [157479, "You won't see me cry,"],
+      [159310, "I'm hiding inside"],
+      [161190, "My heart is in pain,"],
+      [162868, "but I'm smiling for you"],
+      [165000, "Oh baby, I'll try"],
+      [166755, "to make the things right"],
+      [168688, "I need you more than air"],
+      [170305, "when I'm not with you"],
+      [172653, "Please don't ask me why,"],
+      [174385, "just kiss me this time"],
+      [176300, "My only dream"],
+      [178000, "is about you and I"],
+    ],
+  },
+  {
+    name: "Yung Kai: Blue",
+    url: "https://github.com/oe2735/music/raw/refs/heads/main/yung_kai_-_yung_kai_-_blue_Official_Music_Video_(Hydr0.org).mp3",
+    lyrics: [
+      [19318, "Your morning eyes,"],
+      [21690, "I could stare"],
+      [22958, "like watching stars"],
+      [26200, "I could walk you by,"],
+      [29696, "and Ill tell without a thought"],
+      [32416, "You'd be mine,"],
+      [34571, "would you mind"],
+      [36518, "if I took your hand tonight?"],
+      [40574, "Know you're all"],
+      [41864, "that I want this life"],
+      [48134, "I'll imagine we fell in love"],
+      [50879, "I'll nap under"],
+      [51726, "moonlight skies with you"],
+      [54768, "I think I'll picture us,"],
+      [56408, "you with the waves"],
+      [58250, "The ocean's colors"],
+      [60042, "on your face"],
+      [61898, "I'll leave my heart"],
+      [63676, "with your air"],
+      [66316, "So let me fly with you"],
+      [69469, "Will you be forever with me?"],
+      [107151, "My love will always"],
+      [109128, "stay by you"],
+      [112900, "I'll keep it safe,"],
+      [115200, "so don't you worry a thing"],
+      [117969, "I'll tell you I love you more"],
+      [121831, "It's stuck with you forever,"],
+      [125319, "so promise you won't let it go"],
+      [128498, "I'll trust the universe"],
+      [130962, "will always bring me to you"],
+      [136721, "I'll imagine we fell in love"],
+      [139397, "I'll nap under"],
+      [140288, "moonlight skies with you"],
+      [143052, "I think I'll picture us,"],
+      [145012, "you with the waves"],
+      [146847, "The ocean's colors"],
+      [148625, "on your face"],
+      [150609, "I'll leave my heart"],
+      [152350, "with your air"],
+      [154900, "So let me fly with you"],
+      [158400, "Will you be forever with me?"],
+    ],
+  },
+  {
+    name: "Lil Nas X: Industry Baby",
+    url: "https://github.com/oe2735/music/raw/refs/heads/main/Lil_Nas_X_Jack_Harlow_-_INDUSTRY_BABY_(Hydr0.org).mp3",
+    lyrics: [
+      [4596, `D-D-Daytrip took it to ten`],
+      [5869, `(hey!)`],
+      [6764, `Baby back, ayy,`],
+      [8203, `couple racks, ayy`],
+      [9792, `Couple Grammys on him`],
+      [11426, `Couple plaques, ayy`],
+      [13125, `That's a fact, ayy`],
+      [14795, `Throw it back, ayy,`],
+      [16246, `throw it back, ayy`],
+      [17876, `And this one is`],
+      [18712, `for the champions`],
+      [21139, `I ain't lost since I began,`],
+      [23400, `yeah`],
+      [24000, `Funny how you said it`],
+      [24880, `was the end, yeah`],
+      [27360, `Then I went did it again, yeah`],
+      [30624, `I told you long ago`],
+      [32965, `on the road`],
+      [34156, `I got what they waiting for`],
+      [36994, `I don't run from nothing, dawg`],
+      [39463, `Get your soldiers,`],
+      [40686, `tell 'em I ain't laying low`],
+      [43555, `You was never really`],
+      [44553, `rooting for me anyway`],
+      [46808, `When I'm back up at the top,`],
+      [48011, `I wanna hear you say`],
+      [49870, `He dont run from nothing, dawg`],
+      [52281, `Get your soldiers,`],
+      [53501, `tell em that the break is over`],
+      [56079, `(uh)`],
+      [56300, `Need to, uh,`],
+      [57200, `need to get this album done`],
+      [58537, `Need a couple number ones`],
+      [60113, `Need a plaque on every song`],
+      [61816, `Need me like one`],
+      [62574, `with Nicki now`],
+      [63406, `Tell a rap Nigga`],
+      [64142, `I don't see ya (hah)`],
+      [64968, `I'm a pop Nigga`],
+      [65685, `like Bieber (hah)`],
+      [66548, `I don't Fuck Bitches,`],
+      [67286, `I'm queer (hah)`],
+      [68160, `But these Niggas`],
+      [68780, `Bitches like Madea,`],
+      [69367, `yeah, yeah, yeah, ayy`],
+      [71580, `Oh, let do it`],
+      [73089, `I ain't fall off,`],
+      [73765, `I jus aint release my new Shit`],
+      [76252, `I blew up,`],
+      [76887, `now everybody tryna sue me`],
+      [79368, `You call me Nas,`],
+      [80182, `but the hood call me Doobie`],
+      [82062, `And this one is`],
+      [82700, `for the champions`],
+      [85085, `I ain't lost since I began,`],
+      [87400, `yeah`],
+      [88000, `Funny how you said`],
+      [88767, `it was the end, yeah`],
+      [91362, `Then I went did it again, yeah`],
+      [94618, `I told you long ago`],
+      [96972, `on the road`],
+      [98241, `I got what they waiting for`],
+      [101235, `I don't run from nothing, dawg`],
+      [103400, `Get your soldiers,`],
+      [104592, `tell 'em I ain't laying low`],
+      [107666, `You was never really`],
+      [108696, `rooting for me anyway`],
+      [110213, `(ooh, ooh)`],
+      [110783, `When I'm back up at the top,`],
+      [111949, `I wanna hear you say`],
+      [113300, `(ooh, ooh)`],
+      [113916, `He dont run from nothing, dawg`],
+      [116107, `Get your soldiers,`],
+      [117319, `tell em that the break is over`],
+      [121000, `(yeah)`],
+      [121890, `My track record so clean,`],
+      [123869, `they couldn't wait`],
+      [124644, `to just bash me`],
+      [125479, `I must be getting too flashy,`],
+      [126896, `y'all shouldn't have`],
+      [127525, `let the world gas me (woo)`],
+      [128492, `It's too late 'cause`],
+      [129446, `I'm here to stay and`],
+      [130211, `these girls know that Im nasty`],
+      [131300, `(mm)`],
+      [131900, `I sent her back to`],
+      [132696, `her boyfriend with`],
+      [133284, `my handprint on her ass cheek`],
+      [136308, `City talking, we taking notes`],
+      [137966, `Tell 'em all to`],
+      [138581, `keep making posts`],
+      [139478, `Wish he could,`],
+      [140033, `but he can't get close`],
+      [141049, `OG so proud of me that he`],
+      [142554, `choking up while`],
+      [143487, `he making toasts`],
+      [144463, `I'm the type that`],
+      [145076, `you can't control,`],
+      [145796, `said I would then I made it so`],
+      [147969, `I don't clear up rumors (ayy),`],
+      [149612, `where's y'all sense of humor?`],
+      [150777, `(Ayy)`],
+      [151169, `I'm done making jokes 'cause`],
+      [152300, `they got old like baby boomers`],
+      [153971, `Turned my haters to consumers,`],
+      [155444, `I make vets feel`],
+      [156100, `like they juniors (juniors)`],
+      [156969, `Say your time is coming soon,`],
+      [158497, `but just like Oklahoma (mm)`],
+      [160800, `Mine is coming sooner (mm),`],
+      [162400, `I'm just a late bloomer (mm)`],
+      [164000, `I didn't peak in high school,`],
+      [164985, `I'm still out here`],
+      [165800, `getting cuter (woo)`],
+      [167164, `All these social`],
+      [167767, `networks and computers`],
+      [168965, `Got these pussies walking`],
+      [170169, `'round like they ain't losers`],
+      [171505, `I told you long ago`],
+      [173712, `on the road`],
+      [174991, `I got what they waiting for`],
+      [176700, `(I got what they waiting for)`],
+      [178109, `I don't run from nothing, dawg`],
+      [180227, `Get your soldiers,`],
+      [181498, `tell 'em I ain't laying low`],
+      [184098, `You was never really`],
+      [185307, `rooting for me anyway`],
+      [186666, `(ooh, ooh)`],
+      [187458, `When I'm back up at the top,`],
+      [188718, `I wanna hear you say`],
+      [189696, `(ooh, ooh)`],
+      [190326, `He dont run from nothing, dawg`],
+      [193013, `Get your soldiers,`],
+      [194304, `tell em that the break is over`],
+      [198000, `(yeah)`],
+      [202444, `I'm the industry baby, mmm`],
+      [204555, `(yeah)`],
+      [208888, `I'm the industry baby (yeah)`],
+    ],
+  },
+  {
+    name: "Powfu: Death Bed",
+    url: "https://github.com/oe2735/music/raw/refs/heads/main/Powfu_beabadoobee_-_death_bed_coffee_for_your_head_(Hydr0.org).mp3",
+    lyrics: [
+      [100, "Don't stay awake for too long"],
+      [3191, "Don't go to bed"],
+      [5514, "I'll make a cup of coffee"],
+      [7158, "for your head"],
+      [8867, "I'll get you up and going"],
+      [10537, "out of bed"],
+      [12069, "Yeah, I dont wanna fall asleep"],
+      [14395, "I don't wanna pass away"],
+      [16132, "I've been thinking"],
+      [16964, "of our future"],
+      [17819, "Cause Ill never see those days"],
+      [19581, "I don't know why"],
+      [20300, "this has happened,"],
+      [21169, "but I probably deserve it"],
+      [22700, "I tried to do my best,"],
+      [24216, "but you know that"],
+      [25214, "I'm not perfect"],
+      [26354, "I've been praying"],
+      [27097, "for forgiveness,"],
+      [27931, "you've been praying"],
+      [28628, "for my health"],
+      [29500, "When I leave this earth,"],
+      [30829, "hoping youll find someone else"],
+      [32706, "Cause, yeah, were still young,"],
+      [34232, "theres so much we haven't done"],
+      [36175, "Getting married,"],
+      [36843, "start a family,"],
+      [37767, "watch your husband"],
+      [38491, "with his son"],
+      [39544, "I wish it could be me,"],
+      [41012, "but I wont make it of this bed"],
+      [42648, "I hope I go to heaven,"],
+      [44284, "so I see you once again"],
+      [46446, "My life was kindda short,"],
+      [47660, "but I got so many blessings"],
+      [49825, "Happy you were mine,"],
+      [50969, "it sucks that it's all ending"],
+      [53399, "Don't stay awake for too long"],
+      [56507, "Don't go to bed"],
+      [58893, "I'll make a cup of coffee"],
+      [60529, "for your head"],
+      [62299, "I'll get you up and going"],
+      [63875, "out of bed, yeah"],
+    ],
+  },
+  {
+    name: "Ed Sheeran: Shape Of You",
+    url: "https://github.com/oe2735/music/raw/refs/heads/main/Ed_Sheeran_-_Shape_of_You_(Hydr0.org).mp3",
+    lyrics: [
+      [9932, "The club isn't the"],
+      [10541, "best place to find a lover"],
+      [11993, "So the bar is where I go"],
+      [14804, "Me and my friends at"],
+      [15739, "the table doing shots"],
+      [16766, "Drinking fast and then"],
+      [17807, "we talk slow"],
+      [19811, "Come over and start up"],
+      [20705, "a conversation with just me"],
+      [22328, "And trust me I'll"],
+      [23023, "give it a chance now"],
+      [24491, "Take my hand, stop,"],
+      [25571, "put Van the Man on the jukebox"],
+      [27131, "And then we start to dance,"],
+      [28640, "and now I'm singing like"],
+      [29671, "Girl, you know"],
+      [30587, "I want your love"],
+      [32163, "Your love was handmade"],
+      [33297, "for somebody like me"],
+      [35444, "Come on now, follow my lead"],
+      [37227, "I may be crazy, don't mind me"],
+      [39364, "Say, boy, let's"],
+      [40271, "not talk too much"],
+      [42178, "Grab on my waist"],
+      [43064, "and put that body on me"],
+      [45319, "Come on now, follow my lead"],
+      [46864, "Come, come on now,"],
+      [47705, "follow my lead"],
+      [50638, "I'm in love with"],
+      [51332, "the shape of you"],
+      [53147, "We push and pull"],
+      [53804, "like a magnet do"],
+      [55774, "Although my heart"],
+      [56427, "is falling too"],
+      [58193, "I'm in love with your body"],
+      [60855, "And last night you"],
+      [61509, "were in my room"],
+      [63160, "And now my bedsheets"],
+      [63980, "smell like you"],
+      [65010, "Every day discovering"],
+      [66300, "something brand new"],
+      [68273, "I'm in love with your body"],
+    ],
+  },
+  {
+    name: "Blacklite District: Wishing Dead",
+    url: "https://github.com/cx0-peo/songs/raw/refs/heads/main/Blacklite%20District%20-%20Wishing%20Dead%20(Official%20Music%20Video).mp3",
+    lyrics: [
+      [12570, "Let it go"],
+      [13620, "You should wait and see"],
+      [15620, "'Cause you never know"],
+      [16840, "Where you're gonna be"],
+      [18660, "You should take it slow"],
+      [20270, "Let's not jump ahead"],
+      [21790, "You could watch it grow"],
+      [23680, "Instead of wishing dead"],
+      [25000, "Let-let, let it go"],
+      [26000, "You should wait and see"],
+      [28000, "'Cause you never know"],
+      [30000, "Where you're gonna be"],
+      [31000, "You should take it slow"],
+      [33000, "Let's not jump ahead"],
+      [34800, "You could watch it grow"],
+      [35900, "Instead of wishing dead"],
+    ],
+  },
+  {
+    name: "Chris Grey: Let The World Burn",
+    url: "https://github.com/cx0-peo/songs/raw/refs/heads/main/Chris%20Grey%20-%20LET%20THE%20WORLD%20BURN%20(Official%20Lyric%20Video)%20(1).mp3",
+    lyrics: [
+      [5210, "Lost in the fog"],
+      [8520, "I fear that there's still"],
+      [8550, "Further to fall"],
+      [13680, "It's dangerous 'cause"],
+      [13710, "I want it all"],
+      [19170, "And I don't think I care"],
+      [19200, "What it costs"],
+      [24270, "I shouldn't have fallen"],
+      [24300, "In love"],
+      [27170, "Look what it made me"],
+      [27200, "Become"],
+      [29500, "I let you get too close"],
+      [31240, "Just to wake up alone"],
+      [44960, "I'd let the world burn"],
+      [47720, "Let the world burn for you"],
+      [50640, "This is how it always had"],
+      [50670, "To end"],
+      [53260, "If I can't have you then"],
+      [53290, "No one can"],
+      [55910, "I'd let it burn"],
+    ],
+  },
+  {
+    name: "Blacklite District: Back Into Darkness",
+    url: "https://github.com/cx0-peo/songs/raw/refs/heads/main/Blacklite%20District%20-%20Back%20into%20Darkness%20(2).mp3",
+    lyrics: [
+      [13290, "You give and you give"],
+      [14000, "Just to get there and fall"],
+      [16420, "You take and you take"],
+      [18000, "And for nothing at all"],
+      [19440, "You run and you run"],
+      [21000, "Straight into the wall"],
+      [51380, "You fall"],
+      [53000, "Back into darkness again"],
+      [54850, "Realize you can only"],
+      [56500, "Wish it's pretend"],
+      [57820, "No lie"],
+      [59000, "You're in it deep this time"],
+      [60200, "My friend"],
+    ],
+  },
+  {
+    name: "2hollis: Poster Boy",
+    url: "https://github.com/cx0-peo/songs/raw/refs/heads/main/2hollis%20-%20poster%20boy%20(official%20audio).mp3",
+    lyrics: [
+      [35640, "Trash the ploy"],
+      [36200, "Turn myself into a poster boy"],
+      [39630, "L-l-live by the sword"],
+      [41100, "Make myself turn two to four"],
+      [44080, "I-i-i know you want it"],
+      [46100, "Oh you Fucking got it"],
+      [47920, "Running away"],
+      [51140, "i-i-i-i'm running 'round"],
+      [52200, "Push it down"],
+      [53420, "Fuck, you think we going out?"],
+      [55530, "You so wrong, you so dumb"],
+      [57710, "We take our time"],
+      [58200, "We don't rush"],
+      [60840, "Y-y-y-you drive me-"],
+      [61300, "Drive me- drive me crazy"],
+      [65080, "What would it take"],
+      [66350, "To call you my baby"],
+    ],
+  },
+  {
+    name: "Atba' al namrood",
+    url: "https://github.com/Phalynxi/moosic/raw/refs/heads/main/Al-Namrood%20-%20Atba'a%20Al-Namrood_%D8%A3%D8%AA%D8%A8%D8%A7%D8%B9%20%D8%A7%D9%84%D9%86%D9%85%D8%B1%D9%88%D8%AF%20%5BgtOYL4cqg2A%5D.mp3",
+    lyrics: [
+      [0, "Twisted minds do not believe in words"],
+      [7250, "Shattered souls suffer from a limited view"],
+      [14500, "Death is coming and bridge of failure faded"],
+      [21750, "It has no end, the results of war and blood"],
+      [29000, "He has sold his soul for power and governance"],
+      [36250, "Where is the Exit?"],
+      [43500, "But the fear of death does not hide your destiny"],
+    ],
+  },
+  {
+    name: "Metallica: Master of Puppets",
+    url: "https://www.youtube.com/watch?v=uRyAIyq53FY",
+    lyrics: [
+      [60800, `End of passion play,`],
+      [61600, `crumbling away`],
+      [65000, `I’m your source of`],
+      [66000, `self-destruction`],
+      [69200, `Veins that pump with fear,`],
+      [70000, `sucking darkest clear`],
+      [73600, `Leading on your death’s`],
+      [74600, `construction`],
+      [77800, `Taste me you will see`],
+      [80100, `More is all you need`],
+      [82100, `You’re dedicated to`],
+      [84300, `How I’m killing you`],
+      [90400, `Come crawling faster`],
+      [95200, `Obey your master`],
+      [99800, `Your life burns faster`],
+      [104300, `Obey your master`],
+      [106900, `Master`],
+      [108100, `Master of puppets`],
+      [108900, `I’m pulling your strings`],
+      [111100, `Twisting your mind`],
+      [111900, `and smashing your dreams`],
+      [115000, `Blinded by me,`],
+      [115800, `you can’t see a thing`],
+      [118700, `Just call my name,`],
+      [119500, `’cause I’ll hear you scream`],
+      [122000, `Master`],
+      [123100, `Master`],
+      [124200, `Just call my name,`],
+      [125000, `’cause I’ll hear you scream`],
+      [128100, `Master`],
+      [129300, `Master`],
+      [140700, `Needlework the way,`],
+      [141500, `never you betray`],
+      [144900, `Life of death becoming`],
+      [145900, `clearer`],
+      [149300, `Pain monopoly,`],
+      [150100, `ritual misery`],
+      [153400, `Chop your breakfast on a`],
+      [154400, `mirror`],
+      [157700, `Taste me you will see`],
+      [160000, `More is all you need`],
+      [161900, `You’re dedicated to`],
+      [164200, `How I’m killing you`],
+      [170400, `Come crawling faster`],
+      [175100, `Obey your master`],
+      [179800, `Your life burns faster`],
+      [184500, `Obey your master`],
+      [187000, `Master`],
+      [188100, `Master of puppets`],
+      [188900, `I’m pulling your strings`],
+      [192100, `Twisting your mind`],
+      [192900, `and smashing your dreams`],
+      [196100, `Blinded by me,`],
+      [196900, `you can’t see a thing`],
+      [198900, `Just call my name,`],
+      [199700, `’cause I’ll hear you scream`],
+      [202400, `Master`],
+      [203400, `Master`],
+      [204600, `Just call my name,`],
+      [205400, `’cause I’ll hear you scream`],
+      [208500, `Master`],
+      [209700, `Master`],
+      [211100, `Master, master`],
+      [320100, `Master`],
+      [321200, `Master`],
+      [322300, `Where’s the dreams`],
+      [323100, `that I’ve been after?`],
+      [324800, `Master, master`],
+      [326900, `You promised only lies`],
+      [329200, `Laughter, laughter`],
+      [330000, `All I hear or see`],
+      [330800, `is laughter`],
+      [333900, `Laughter, laughter`],
+      [336100, `Laughing at my cries`],
+      [341800, `Fix me`],
+      [409000, `Hell is worth all that,`],
+      [409800, `natural habitat`],
+      [413200, `Just a rhyme`],
+      [414000, `without a reason`],
+      [417400, `Never-ending maze,`],
+      [418200, `drift on numbered days`],
+      [421700, `Now your life`],
+      [422500, `is out of season`],
+      [425900, `I will occupy`],
+      [428100, `I will help you die`],
+      [430200, `I will run through you`],
+      [432400, `Now I rule you too`],
+      [438600, `Come crawling faster`],
+      [443100, `Obey your master`],
+      [447600, `Your life burns faster`],
+      [452200, `Obey your master`],
+      [454600, `Master`],
+      [455700, `Master of puppets`],
+      [456500, `I’m pulling your strings`],
+      [459800, `Twisting your mind`],
+      [460600, `and smashing your dreams`],
+      [463700, `Blinded by me,`],
+      [464500, `you can’t see a thing`],
+      [466500, `Just call my name,`],
+      [467300, `’cause I’ll hear you scream`],
+      [469800, `Master`],
+      [471000, `Master`],
+      [472100, `Just call my name,`],
+      [472900, `’cause I’ll hear you scream`],
+      [475900, `Master`],
+      [477100, `Master`],
+    ],
+  },
+  {
+    name: "Disturbed: Down with the Sickness",
+    url: "https://www.youtube.com/watch?v=09LTT0xwdfw",
+    lyrics: [
+      [4500, `Can you feel that?`],
+      [9800, `Ah, shit`],
+      [20700, `Oh, ah, ah, ah, ah`],
+      [31300, `Oh, ah, ah, ah, ah`],
+      [34200, `oh, oh, oh, oh, oh, oh`],
+      [42900, `Drowning deep in my sea`],
+      [43900, `of loathing`],
+      [48300, `Broken your servant I kneel`],
+      [52600, `(Will you give in to me?)`],
+      [53900, `It seems what's left of`],
+      [54900, `my human side`],
+      [58100, `Is slowly changing in me`],
+      [63400, `(Will you give in to me?)`],
+      [64700, `Looking at my own reflection`],
+      [68100, `When suddenly it changes`],
+      [71000, `Violently it changes (oh no)`],
+      [75000, `There is no turning back now`],
+      [78700, `You've woken up the`],
+      [79700, `demon in me`],
+      [85900, `Get up, come on get down`],
+      [86900, `with the sickness`],
+      [88600, `Get up, come on get down`],
+      [89600, `with the sickness`],
+      [91300, `Get up, come on get down`],
+      [92300, `with the sickness`],
+      [93700, `Open up your hate, and`],
+      [94700, `let it flow into me`],
+      [96600, `Get up, come on get down`],
+      [97600, `with the sickness`],
+      [99000, `You mother get up come on`],
+      [100000, `get down with the sickness`],
+      [101700, `You fucker get up come on`],
+      [102700, `get down with the sickness`],
+      [104500, `Madness is the gift, that`],
+      [105500, `has been given to me`],
+      [112400, `I can see inside you,`],
+      [113400, `the sickness is rising`],
+      [117400, `Don't try to deny what`],
+      [118400, `you feel`],
+      [122000, `(Will you give in to me?)`],
+      [123300, `It seems that all that`],
+      [124300, `was good has died`],
+      [127500, `And is decaying in me`],
+      [132800, `(Will you give in to me?)`],
+      [134000, `It seems you're having`],
+      [135000, `some trouble`],
+      [137300, `In dealing with these`],
+      [138300, `changes`],
+      [140200, `Living with these`],
+      [141200, `changes (oh no)`],
+      [144200, `The world is a scary place`],
+      [147400, `Now that you've woken up`],
+      [148400, `the demon in me`],
+      [155400, `Get up, come on get down`],
+      [156400, `with the sickness`],
+      [157900, `Get up, come on get down`],
+      [158900, `with the sickness`],
+      [160600, `Get up, come on get down`],
+      [161600, `with the sickness`],
+      [163100, `Open up your hate, and`],
+      [164100, `let it flow into me`],
+      [165900, `Get up, come on get down`],
+      [166900, `with the sickness`],
+      [168200, `You mother get up come on`],
+      [169200, `get down with the sickness`],
+      [171000, `You fucker get up come on`],
+      [172000, `get down with the sickness`],
+      [173700, `Madness is the gift, that`],
+      [174700, `has been given to me`],
+      [180600, `(And when I dream)`],
+      [186000, `(And when I dream)`],
+      [191500, `Oh, ah, ah, ah, ah`],
+      [192700, `Get up, come on get down`],
+      [193700, `with the sickness`],
+      [195400, `Get up, come on get down`],
+      [196400, `with the sickness`],
+      [198000, `Get up, come on get down`],
+      [199000, `with the sickness`],
+      [200600, `Open up your hate, and`],
+      [201600, `let it flow into me`],
+      [203300, `Get up, come on get down`],
+      [204300, `with the sickness`],
+      [205600, `You mother get up come on`],
+      [206600, `get down with the sickness`],
+      [208400, `You fucker get up come on`],
+      [209400, `get down with the sickness`],
+      [211200, `Madness has now come`],
+      [212200, `over me`],
+    ],
+  },
+  {
+    name: "Avenged Sevenfold: Nightmare",
+    url: "https://www.youtube.com/watch?v=94bGzWyHbu0",
+    lyrics: [
+      [61100, `Nightmare!`],
+      [64930, `(Now your nightmare comes`],
+      [65930, `to life)`],
+      [70210, `Dragged you down below`],
+      [71190, `Down to the devil's show`],
+      [73680, `To be his guest forever`],
+      [75490, `Peace of mind is less than`],
+      [76490, `never`],
+      [77750, `Hate to twist your mind`],
+      [79430, `But God ain't on your side`],
+      [81190, `An old acquaintance severed`],
+      [82940, `Burn the world, your last`],
+      [83940, `endeavor`],
+      [84980, `Flesh is burning, you can`],
+      [85980, `smell it in the air`],
+      [87730, `'Cause men like you have`],
+      [88730, `such an easy soul to steal`],
+      [92160, `So stand in line while they`],
+      [93160, `ink numbers in your head`],
+      [95110, `You're now a slave until`],
+      [96110, `the end of time here`],
+      [97700, `Nothing stops the madness`],
+      [98700, `turning, yearning`],
+      [100410, `Pull the trigger`],
+      [101670, `You should have known the`],
+      [102670, `price of evil`],
+      [108900, `And it hurts to know that`],
+      [109900, `you belong here, yeah`],
+      [115880, `Ooh, it's your fuckin'`],
+      [116880, `nightmare`],
+      [122700, `(While your nightmare comes`],
+      [123700, `to life)`],
+      [127390, `Can't wake up in sweat`],
+      [129150, `'Cause it ain't over yet`],
+      [130750, `Still dancing with your`],
+      [131750, `demons`],
+      [132660, `Victim of your own creation`],
+      [134770, `Beyond the will to fight`],
+      [136380, `Where all that's wrong is`],
+      [137380, `right`],
+      [138540, `Where hate don't need a`],
+      [139540, `reason`],
+      [140130, `Loathing self-assassination`],
+      [142430, `You've been lied to just`],
+      [143430, `to rape you of your sight`],
+      [145100, `And now they have the nerve`],
+      [146100, `to tell you how to feel`],
+      [149450, `So sedated as they`],
+      [150450, `medicate your brain`],
+      [152380, `And while you slowly go`],
+      [153380, `insane, they tell you`],
+      [154790, `Given with the best`],
+      [155790, `intentions`],
+      [156720, `Help you with your`],
+      [157720, `complications"`],
+      [159140, `You should have known the`],
+      [160140, `price of evil`],
+      [166300, `And it hurts to know that`],
+      [167300, `you belong here, yeah`],
+      [173650, `No one to call, everybody`],
+      [174650, `to fear`],
+      [180840, `Your tragic fate is`],
+      [181840, `looking so clear, yeah`],
+      [188110, `Ooh, it's your fuckin'`],
+      [189110, `nightmare`],
+      [248890, `Fight (fight)`],
+      [250400, `Not to fail (fail)`],
+      [251840, `Not to fall (fall)`],
+      [253680, `Or you'll end up like the`],
+      [254680, `others`],
+      [256250, `Die (die)`],
+      [257620, `Die again (die)`],
+      [259340, `Drenched in sin (sin)`],
+      [261220, `With no respect for another`],
+      [274740, `Down (down)`],
+      [275990, `Feel the fire (fire)`],
+      [277850, `Feel the hate (hate)`],
+      [279460, `Your pain is what we`],
+      [280460, `desire`],
+      [282140, `Lost (lost)`],
+      [283360, `Hit the wall (wall)`],
+      [285170, `Watch you crawl (crawl)`],
+      [286950, `Such a replaceable liar`],
+      [290990, `And I know you hear their`],
+      [291990, `voices`],
+      [295400, `(Calling from above)`],
+      [298350, `And I know they may seem`],
+      [299350, `real`],
+      [303700, `(These signals of love)`],
+      [305470, `But our life's made up of`],
+      [306470, `choices`],
+      [310200, `(Some without appeal)`],
+      [312270, `They took for granted,`],
+      [313270, `your soul`],
+      [316620, `And it's ours now to steal`],
+      [321350, `(As your nightmare comes`],
+      [322350, `to life)`],
+      [327400, `You should have known the`],
+      [328400, `price of evil`],
+      [334100, `And it hurts to know that`],
+      [335100, `you belong here, yeah`],
+      [341730, `No one to call, everybody`],
+      [342730, `to fear`],
+      [348840, `Your tragic fate is`],
+      [349840, `looking so clear, yeah`],
+      [356100, `Ooh, it's your fuckin'`],
+      [357100, `nightmare`],
+    ],
+  },
+  {
+    name: "Avenged Sevenfold: So Far Away",
+    url: "https://www.youtube.com/watch?v=A7ry4cx6HfY",
+    lyrics: [
+      [1800, `Never feared for anything,`],
+      [2800, `never chained but never free`],
+      [7700, `I tried to heal the broken`],
+      [8700, `love with all I could`],
+      [13800, `Lived a life so endlessly`],
+      [14800, `saw beyond what others see`],
+      [20200, `I tried to heal the broken`],
+      [21200, `love with all I could`],
+      [26600, `Will you stay`],
+      [29600, `Will you stay away forever`],
+      [33100, `How do I live without the`],
+      [34100, `ones I love?`],
+      [39000, `Time still turns the pages`],
+      [40000, `of the book its burned`],
+      [45400, `Place and time always on my`],
+      [46400, `mind`],
+      [51400, `I have so much to say but`],
+      [52400, `you're so far away`],
+      [58800, `Plans of what our futures`],
+      [59800, `hold`],
+      [61500, `Foolish lies of growing old`],
+      [64400, `It seems we're so`],
+      [65400, `invincible`],
+      [67100, `The truth is so cold`],
+      [71000, `A final song, a last request`],
+      [73800, `A perfect chapter laid to`],
+      [74800, `rest`],
+      [76900, `Now and then I try to find`],
+      [77900, `a place in my mind`],
+      [83400, `Where you can stay you can`],
+      [84400, `stay awake forever`],
+      [89900, `How do I live without the`],
+      [90900, `ones I love?`],
+      [95700, `Time still turns the pages`],
+      [96700, `of the book its burned`],
+      [102200, `Place and time always on my`],
+      [103200, `mind`],
+      [108200, `I have so much to say but`],
+      [109200, `you're so far away`],
+      [114900, `Sleep tight, I'm not afraid`],
+      [121000, `The ones that we love are`],
+      [122000, `here with me`],
+      [127500, `Lay away a place for me`],
+      [128500, `'cause as soon as I'm done`],
+      [135900, `I'll be on my way to live`],
+      [136900, `eternally`],
+      [172200, `How do I live without the`],
+      [173200, `ones I love?`],
+      [177800, `Time still turns the pages`],
+      [178800, `of the book its burned`],
+      [184600, `Place and time always on my`],
+      [185600, `mind`],
+      [190200, `And the light you left`],
+      [191200, `remains but it's so hard to stay`],
+      [196700, `When I have so much to say`],
+      [197700, `and you're so far away`],
+      [268700, `I love you, you were ready`],
+      [271800, `The pain is strong and`],
+      [272800, `urges rise`],
+      [281900, `But I'll see you when He`],
+      [282900, `lets me`],
+      [284900, `Your pain is gone, your`],
+      [285900, `hands are tied`],
+      [294200, `So far away and I need you`],
+      [295200, `to know`],
+      [307100, `So far away and I need you`],
+      [308100, `to need you to know`],
+    ],
+  },
+  {
+    name: "Avicii - The Nights",
+    url: "https://www.youtube.com/watch?v=UtF6Jej8yb4",
+    lyrics: [
+      [3200, "Once upon a younger year"],
+      [4895, "When all our shadows"],
+      [5960, "disappeared"],
+      [6805, "The animals inside"],
+      [8017, "came out to play"],
+      [10754, "Went face to face"],
+      [11482, "with all our fears"],
+      [12731, "Learned our lessons"],
+      [13646, "through the tears"],
+      [14428, "Made memories we knew"],
+      [15761, "would never fade"],
+      [17794, "One day, my father,"],
+      [19150, "he told me,"],
+      [19864, "Son, don't let it slip away"],
+      [22065, "He took me in his arms,"],
+      [23325, "I heard him say"],
+      [25869, "When you get older,"],
+      [26778, "your wild heart will"],
+      [28002, "live for younger days"],
+      [29788, "Think of me if"],
+      [30689, "ever you're afraid"],
+      [32988, "He said,"],
+      [33654, "One day,"],
+      [34508, "you'll leave this world behind"],
+      [36777, "So live a life"],
+      [38205, "you will remember"],
+      [40695, "My father told me when"],
+      [42318, "I was just a child"],
+      [44429, "These are the nights"],
+      [45729, "that never die"],
+      [47686, "My father told me"],
+      [79400, "When thunderclouds"],
+      [80349, "start pouring down"],
+      [81219, "Light a fire"],
+      [81992, "they can't put out"],
+      [83286, "Carve your name"],
+      [83917, "into those shining stars"],
+      [86457, "He said,"],
+      [87010, "Go venture far"],
+      [87841, "beyond the shores"],
+      [88876, "Don't forsake this"],
+      [89746, "life of yours"],
+      [90527, "I'll guide you home"],
+      [91493, "no matter where you are"],
+      [93932, "One day, my father,"],
+      [95309, "he told me,"],
+      [96018, "Son, don't let it slip away"],
+      [98247, "When I was just a kid,"],
+      [99549, "I heard him say"],
+      [101853, "When you get older,"],
+      [103150, "your wild heart"],
+      [104064, "will live for younger days"],
+      [106088, "Think of me if"],
+      [106947, "ever you're afraid"],
+      [109229, "He said,"],
+      [109656, "One day,"],
+      [110614, "you'll leave this world behind"],
+      [113017, "So live a life"],
+      [114356, "you will remember"],
+      [116823, "My father told me when"],
+      [118283, "I was just a child"],
+      [120576, "These are the nights"],
+      [121980, "that never die"],
+      [124003, "My father told me"],
+      [136169, "These are the nights"],
+      [137292, "that never die"],
+      [139361, "My father told me"],
+      [163736, "Oh~"],
+      [169915, "My father told me"],
+    ],
+  },
+  {
+    name: "Initial D - Gas Gas Gas",
+    url: "https://www.youtube.com/watch?v=atuFSv2bLa8",
+    lyrics: [
+      [17000, "Ahhhhh"],
+      [19954, "gas,"],
+      [20720, "Gas,"],
+      [21509, "gas"],
+      [24000, "Ahhhhh"],
+      [28432, "Do you like"],
+      [29789, "My car?"],
+      [31489, "my car"],
+      [33067, "m y  c a r"],
+      [53120, "Guess you're ready"],
+      [54234, "Cause I'm waiting for you"],
+      [55956, "It's gonna be so exciting!"],
+      [59140, "Got this feeling"],
+      [60397, "Really deep in my soul"],
+      [62309, "Let's get out, I wanna go"],
+      [63983, "Come along, get it on!"],
+      [65956, "Gonna take my car"],
+      [67536, "Gonna sit in"],
+      [69106, "Gona drive along til I get you"],
+      [71770, "Cause I'm crazy, hot and ready"],
+      [73609, "But you'll like it!"],
+      [74894, "I wanna race for you!"],
+      [76739, "(Shall I go now?)"],
+      [78426, "Gas Gas Gas!"],
+      [79661, "I'm gonna step on the gas"],
+      [81378, "Tonight I'll fly!"],
+      [82900, "And be your lover"],
+      [84218, "Yeah yeah yeah!"],
+      [85933, "I'll be so quick as a flash"],
+      [87594, "And I'll be your hero"],
+      [90462, "Gas Gas Gas!"],
+      [92184, "I'm gonna run as a flash"],
+      [93930, "Tonight I'll fight!"],
+      [95561, "To be the winner"],
+      [96766, "Yeah yeah yeah!"],
+      [98475, "I'm gonna step on the gas"],
+      [100093, "And you'll see the big show!"],
+      [115553, "Don't be lazy"],
+      [116577, "Cause I'm burning for you"],
+      [118431, "It's like a hot sensation!"],
+      [121661, "Got this power"],
+      [122805, "That is taking me out"],
+      [124524, "Yes, I've got a crush on you"],
+      [126383, "Ready, now"],
+      [127324, "Ready, go!"],
+      [128283, "Gonna take my car"],
+      [129837, "Gonna sit in"],
+      [131431, "Gona drive along til I get you"],
+      [134033, "Cause I'm crazy, hot and ready"],
+      [135838, "But you'll like it!"],
+      [137299, "I wanna race for you!"],
+      [139000, "Shall I go now?"],
+      [140495, "Gas Gas Gas!"],
+      [141981, "I'm gonna step on the gas"],
+      [143616, "Tonight I'll fly!"],
+      [145350, "And be your lover"],
+      [146554, "Yeah yeah yeah!"],
+      [148246, "I'll be so quick as a flash"],
+      [149886, "And I'll be your hero"],
+      [152696, "Gas Gas Gas!"],
+      [154549, "I'm gonna run as a flash"],
+      [156175, "Tonight I'll fight!"],
+      [157747, "To be the winner"],
+      [158965, "Yeah yeah yeah!"],
+      [160813, "I'm gonna step on the gas"],
+      [162436, "And you'll see the big show!"],
+      [190357, "Guess you're ready"],
+      [191319, "Cause I'm waiting for you"],
+      [193338, "It's gonna be so exciting!"],
+      [196258, "Got this feeling"],
+      [197534, "Really deep in my soul"],
+      [199240, "Let's get out, I wanna go"],
+      [201109, "Come along, get it on"],
+      [203124, "Gonna take my car"],
+      [206184, "Do you like my car?"],
+      [208904, "Cause I'm crazy, hot and ready"],
+      [210626, "But you'll like it!"],
+      [212057, "I wanna race for you!"],
+      [213833, "Shall I go now?"],
+      [216846, "Gas Gas Gas!"],
+      [218433, "I'm gonna step on the gas"],
+      [220052, "Tonight I'll fly!"],
+      [221687, "And be your lover"],
+      [222927, "Yeah yeah yeah!"],
+      [224791, "I'll be so quick as a flash"],
+      [226348, "And I'll be your hero"],
+      [229497, "Gas Gas Gas!"],
+      [230955, "I'm gonna run as a flash"],
+      [232590, "Tonight I'll fight!"],
+      [234096, "To be the winner"],
+      [235462, "Yeah yeah yeah!"],
+      [237258, "I'm gonna step on the gas"],
+      [238816, "And you'll see the big show!"],
+      [242147, "Gas Gas Gas!"],
+      [244960, "Yeah yeah yeah!"],
+      [248228, "Gas Gas Gas!"],
+      [251217, "And you'll see the big show!"],
+    ],
+  },
+  {
+    name: "Ruth B - Dandelions",
+    url: "https://www.youtube.com/watch?v=5gg17XXXiNo",
+    lyrics: [
+      [12262, "Maybe it's the way you"],
+      [13658, "say my name"],
+      [18179, "Maybe it's the way you"],
+      [19909, "play your game"],
+      [23413, "But it's so good,"],
+      [25263, "I've never known"],
+      [26444, "anybody like you"],
+      [29395, "But it's so good,"],
+      [31377, "I've never dreamed"],
+      [32581, "of nobody like you"],
+      [36052, "And I've heard of a love"],
+      [38112, "that comes once in a lifetime"],
+      [42952, "And I'm pretty sure that"],
+      [44197, "you are that love of mine"],
+      [48426, "'Cause"],
+      [49149, "I'm in a field of dandelions"],
+      [52165, "Wishing on every one"],
+      [54328, "that you'd be mine,"],
+      [58249, "mine"],
+      [60742, "And I see forever"],
+      [62970, "in your eyes"],
+      [64612, "I feel okay when I"],
+      [66752, "see you smile,"],
+      [70601, "smile"],
+      [73029, "Wishing on dandelions"],
+      [74563, "all of the time"],
+      [76054, "Praying to God that"],
+      [77225, "one day you'll be mine"],
+      [79069, "Wishing on dandelions"],
+      [80697, "all of the time,"],
+      [82231, "all of the time"],
+      [85965, "I think that you"],
+      [87070, "are the one for me"],
+      [91994, "'Cause it gets so"],
+      [92369, "hard to breathe"],
+      [97220, "When you're looking at me,"],
+      [98988, "I've never felt so"],
+      [100361, "alive and free"],
+      [103448, "When you're looking at me,"],
+      [105249, "I've never felt so happy"],
+      [109930, "And I've heard of a love"],
+      [111902, "that comes once in a lifetime"],
+      [116665, "And I'm pretty sure that"],
+      [117986, "you are that love of mine"],
+      [122308, "'Cause"],
+      [123135, "I'm in a field of dandelions"],
+      [126030, "Wishing on every one"],
+      [128050, "that you'd be mine,"],
+      [131823, "mine"],
+      [134401, "And I see forever"],
+      [136962, "in your eyes"],
+      [138340, "I feel okay when I"],
+      [140597, "see you smile,"],
+      [144420, "smile"],
+      [147113, "Wishing on dandelions"],
+      [148588, "all of the time"],
+      [149911, "Praying to God that"],
+      [151384, "one day you'll be mine"],
+      [153038, "Wishing on dandelions"],
+      [154526, "all of the time"],
+      [155979, "All of the time"],
+      [159832, "Dandelion,"],
+      [160821, "into the wind you go"],
+      [162930, "Won't you let"],
+      [164150, "my darling know?"],
+      [166029, "Dandelion,"],
+      [167097, "into the wind you go"],
+      [169038, "Won't you let"],
+      [169975, "my darling know?"],
+      [171700, "That"],
+      [173969, "I'm in a field of dandelions"],
+      [176822, "Wishing on every one that"],
+      [179183, "you'd be mine,"],
+      [182976, "mine"],
+      [185325, "And I see forever"],
+      [187536, "in your eyes"],
+      [189051, "I feel okay when I"],
+      [191232, "see you smile,"],
+      [195272, "smile"],
+      [197665, "Wishing on dandelions"],
+      [199124, "all of the time"],
+      [200537, "Praying to God that"],
+      [201771, "one day you'll be mine"],
+      [203741, "Wishing on dandelions"],
+      [205284, "all of the time,"],
+      [206818, "all of the time"],
+      [210608, "I'm in a field of dandelions"],
+      [213827, "Wishing on every one that"],
+      [216100, "you'd be mine,"],
+      [219909, "mine"],
+    ],
+  },
+  {
+    name: "Sub Urban - Cradles",
+    url: "https://www.youtube.com/watch?v=KBtk5FUeJbk",
+    lyrics: [
+      [12757, "I live inside my own"],
+      [15758, "world of make-believe"],
+      [18587, "Kids screaming"],
+      [20238, "in their cradles,"],
+      [22040, "profanities"],
+      [24702, "I see the world through eyes"],
+      [27215, "covered in ink and bleach"],
+      [30746, "Cross out the ones who heard"],
+      [33242, "my cries and watched me weep"],
+      [36700, "I love everything"],
+      [39742, "Fire's spreading"],
+      [41193, "all around my room"],
+      [43257, "My world's so bright"],
+      [44664, "It's hard to breathe"],
+      [46165, "but that's alright"],
+      [47436, "Hush Shh"],
+      [72704, "Tape my eyes open"],
+      [74621, "to force reality"],
+      [76696, "(oh, no no)"],
+      [78525, "Why can't you just let me"],
+      [80876, "eat my weight in glee"],
+      [84737, "I live inside my own"],
+      [87595, "world of make-believe"],
+      [90622, "Kids screaming"],
+      [91974, "in their cradles,"],
+      [93934, "profanities"],
+      [96731, "Some days I feel skinnier"],
+      [99084, "than all the other days"],
+      [102780, "Sometimes I can't tell"],
+      [104407, "if my body belongs to me"],
+      [108800, "I love everything"],
+      [111452, "Fire's spreading"],
+      [112835, "all around my room"],
+      [115108, "My world's so bright"],
+      [116547, "It's hard to breathe"],
+      [118155, "but that's alright"],
+      [119402, "Hush Shh"],
+      [144344, "I wanna taste your content"],
+      [146703, "Hold your breath and"],
+      [148365, "feel the tension"],
+      [150024, "Devils hide behind redemption"],
+      [152745, "Honesty is a"],
+      [154330, "one-way gate to hell"],
+      [156300, "I wanna taste consumption"],
+      [159100, "Breathe faster to waste oxygen"],
+      [162090, "Hear the children sing aloud"],
+      [164628, "It's music 'til the"],
+      [166425, "wick burns out"],
+      [167776, "Hush"],
+      [180700, "Just wanna be"],
+      [181627, "care free lately,"],
+      [184477, "yeah"],
+      [185000, "Just kicking up daisies"],
+      [188225, "Got one too many"],
+      [189336, "quarters in my pockets"],
+      [191585, "Count 'em like the four-leaf"],
+      [193231, "clovers in my locket"],
+      [195292, "Untied laces, yeah"],
+      [198507, "Just tripping on daydreams"],
+      [201160, "Got dirty little lullabies"],
+      [203140, "playing on repeat"],
+      [204662, "Might as well just rot around"],
+      [206200, "the nursery and count sheep"],
+    ],
+  },
+  {
+    name: "Kord Hell - Scopin",
+    url: "https://www.youtube.com/watch?v=VXaq77GiyEo",
+    lyrics: [
+      [2732, "I got that gauge 38"],
+      [3934, "and that four-five Glock"],
+      [5066, "Deep in the bushes, see"],
+      [5954, "I'm scopin' with that red dot"],
+      [7532, "I got that, I got that,"],
+      [8784, "I got that four-five Glock"],
+      [9905, "Deep in the bushes, see"],
+      [10848, "I'm scopin' with that red dot"],
+      [12486, "I got that gauge 38"],
+      [13583, "and that four-five Glock"],
+      [14860, "Deep in the bushes, see"],
+      [15688, "I'm scopin' with that red dot"],
+      [17365, "I got that, I got that,"],
+      [18203, "I got that, I got that"],
+      [19522, "I, I, I, I"],
+      [30581, "Scopin' with that red dot"],
+      [39267, "Deep in the bushes, see"],
+      [40266, "I'm scopin' with that red dot"],
+      [41762, "I got that gauge 38"],
+      [43041, "and that four-five Glock"],
+      [44272, "Deep in the bushes, see"],
+      [45270, "I'm scopin' with that red dot"],
+      [46746, "I got that, I got that,"],
+      [47901, "I got that four-five Glock"],
+      [49176, "Deep in the bushes, see"],
+      [50071, "I'm scopin' with that red dot"],
+      [51587, "I got that gauge 38"],
+      [52684, "and that four-five Glock"],
+      [53830, "Deep in the bushes, see"],
+      [54965, "I'm scopin' with that red dot"],
+      [56433, "I got that, I got that,"],
+      [57588, "I got that four-five Glock"],
+      [58831, "Deep in the bushes, see I'm"],
+      [59823, "scopin' with that red dot"],
+      [69768, "Scopin' with that red dot"],
+      [78434, "Deep in the bushes, see"],
+      [79314, "I'm scopin' with that red dot"],
+      [81811, "Scopin' with that red dot"],
+      [84108, "Scopin', scopin'"],
+      [84779, "with that red dot"],
+      [86825, "Scopin' with that red dot"],
+      [88363, "Deep in the bushes, see"],
+      [89175, "I'm scopin' with that red dot"],
+      [91900, "Scopin' with that red dot"],
+      [93989, "Scopin', scopin'"],
+      [94560, "with that red dot"],
+      [96801, "Scopin' with that red dot"],
+      [97969, "Deep in the bushes, see"],
+      [99088, "I'm scopin' with that red dot"],
+    ],
+  },
+  {
+    name: "The Living Tombstone - My Ordinary Life",
+    url: "https://www.youtube.com/watch?v=9Zj0JOHJR-s",
+    lyrics: [
+      [29252, "They tell me keep it simple,"],
+      [30570, "I tell them take it slow"],
+      [31904, "I feed and water an idea,"],
+      [33362, "so I let it grow"],
+      [34596, "I tell them take it easy,"],
+      [35829, "they laugh and tell me no"],
+      [37143, "It's cool, but I dont see them"],
+      [38277, "laughin' at my money, though"],
+      [39705, "They spittin' facts at me,"],
+      [41002, "Im spittin' tracks, catch me?"],
+      [42366, "Im spinnin gold out my records"],
+      [43847, "know you can't combat me"],
+      [45121, "They tell me, Jesus walks,"],
+      [46289, "I tell them, money talks"],
+      [47504, "Bling got me chill, 'cause im"],
+      [48915, "living in an icebox"],
+      [50551, "They tell me I've been sleepin"],
+      [51669, "I say im wide awake"],
+      [52885, "Tracks hot and ready so they,"],
+      [54230, "call me Mr. Easy-Bake"],
+      [55574, "They say the grass is greener,"],
+      [56962, "I think my grass is dank"],
+      [58122, "Drivin' with a drank on an"],
+      [59514, "empty tank to the bank"],
+      [61220, "Do you feel me? Take a look,"],
+      [62413, "inside my brain"],
+      [63644, "The people always different,"],
+      [64569, "but it always feels the same"],
+      [66009, "That's the real me, pop the"],
+      [67614, "champagne"],
+      [68586, "The haters wanna hurt me,"],
+      [69775, "and im laughin' at the pain"],
+      [72107, "Stayin' still, eyes closed"],
+      [74235, "Let the world just pass me by,"],
+      [77245, "Pain pills, nice clothes"],
+      [79611, "If I fall, I think I'll fly"],
+      [82366, "Touch me, Midas"],
+      [84691, "Make me part of your design"],
+      [87629, "None to, guide us"],
+      [89943, "I feel fear"],
+      [91005, "for the very last time"],
+      [114272, "They tell me that im special,"],
+      [115274, "I smile and shake my head"],
+      [116527, "I'll give them stories to tell,"],
+      [117793, "friends bout the things I said"],
+      [119228, "They tell me im so humble,"],
+      [120424, "I say im turning red"],
+      [121833, "They let me lie to them"],
+      [122856, "and dont feel like"],
+      [123662, "they've been misled"],
+      [124661, "They give so much to me,"],
+      [125733, "Im losing touch, get me?"],
+      [127113, "Served on a silver platter,"],
+      [128150, "ask for seconds,"],
+      [129043, "they just let me"],
+      [129909, "They tell me im a god,"],
+      [131044, "Im lost in the facade"],
+      [132378, "Six feet off the ground at all"],
+      [133453, "times, I think im feelin' odd"],
+      [135203, "No matter what I make,"],
+      [136306, "they never see mistakes"],
+      [137493, "Makin' so much bread,"],
+      [138562, "I don't care that"],
+      [139300, "they're just fake"],
+      [140468, "They tell me they're below me,"],
+      [141579, "I act like im above"],
+      [142638, "The people blend together,"],
+      [143686, "but I'd be lost"],
+      [144496, "without their love"],
+      [145775, "Can you heal me?"],
+      [146578, "Have I gained too much?"],
+      [148125, "When you become untouchable,"],
+      [149228, "you're unable to touch"],
+      [150882, "Is there a real me?"],
+      [151910, "Pop the champagne"],
+      [153164, "It hurts me just to think,"],
+      [154310, "and I don't do pain"],
+      [156397, "Stayin' still, eyes closed,"],
+      [158726, "Let the world just pass me by"],
+      [161741, "Pain pills, nice clothes,"],
+      [164232, "If I fall, I think I'll fly"],
+      [167202, "Touch me, Midas,"],
+      [169509, "Make me part of your design,"],
+      [172527, "None to guide us,"],
+      [174481, "I feel fear"],
+      [175555, "for the very last time"],
+      [177913, "Lay still, restless,"],
+      [180073, "Losing sleep while"],
+      [181003, "I lose my mind"],
+      [182800, "All thrill, no stress,"],
+      [185234, "All my muses left behind"],
+      [188339, "World is below,"],
+      [190847, "So high up, im near-divine"],
+      [193805, "Lean in, let go,"],
+      [195774, "I feel fear"],
+      [196752, "for the very last time"],
+    ],
+  },
+  {
+    name: "Marina - Bubblegum Bitch",
+    url: "https://www.youtube.com/watch?v=n3M4GrEEQTI",
+    lyrics: [
+      [14000, "I've got a figure"],
+      [14710, "like a pin-up"],
+      [15803, "Got a figure like a doll"],
+      [17428, "Don't care if you"],
+      [18091, "think I'm dumb"],
+      [18948, "I don't care at all"],
+      [20369, "Candy bear, sweetie pie"],
+      [21912, "I wanna be adored"],
+      [23489, "I'm the girl you'd die for"],
+      [26797, "I'll chew you up and"],
+      [28353, "I'll spit you out"],
+      [29885, "'Cause that's what young love"],
+      [31243, "is all about"],
+      [32897, "So pull me closer"],
+      [34457, "and kiss me hard"],
+      [35823, "I'm gonna pop your"],
+      [37003, "bubblegum heart"],
+      [38684, "I'm Miss Sugar Pink,"],
+      [40104, "liquor, liquor lips"],
+      [41614, "Hit me with your sweet love"],
+      [43110, "Steal me with a kiss"],
+      [44756, "I'm Miss Sugar Pink,"],
+      [46175, "liquor, liquor lips"],
+      [47645, "I'm gonna be your"],
+      [49368, "bubblegum Bitch"],
+      [50850, "I'm gonna be your"],
+      [52241, "bubblegum Bitch"],
+      [60048, "Queentex, latex,"],
+      [61433, "I'm your wonder maid"],
+      [62908, "Life gave me some lemons,"],
+      [64119, "so I made some lemonade"],
+      [66088, "Soda pop, soda pop,"],
+      [67439, "baby here I come"],
+      [68992, "Straight to number one"],
+      [72315, "Oh, Dear diary, I met a boy"],
+      [75314, "He made my doll heart"],
+      [76714, "light up with joy"],
+      [78347, "Oh, Dear diary, we fell apart"],
+      [81224, "Welcome to the life"],
+      [82184, "of Electra Heart"],
+      [84233, "I'm Miss Sugar Pink,"],
+      [85724, "liquor, liquor lips"],
+      [87192, "Hit me with your sweet love"],
+      [88753, "Steal me with a kiss"],
+      [90297, "I'm Miss Sugar Pink,"],
+      [91787, "liquor, liquor lips"],
+      [93254, "I'm gonna be your"],
+      [94813, "bubblegum Bitch"],
+      [96370, "I'm gonna be your"],
+      [97863, "bubblegum Bitch"],
+      [99490, "I think I want your-,"],
+      [101317, "your American tan"],
+      [104129, "Oh, oh, oh"],
+      [105700, "I think you're gonna"],
+      [107266, "be my biggest fan"],
+      [110427, "Oh, oh, oh"],
+      [123868, "I'm Miss Sugar Pink,"],
+      [125300, "liquor, liquor lips"],
+      [126826, "Hit me with your sweet love"],
+      [128235, "Steal me with a kiss"],
+      [129795, "I'm Miss Sugar Pink,"],
+      [131218, "liquor, liquor lips"],
+      [132789, "I'm gonna be your"],
+      [134310, "bubblegum Bitch"],
+      [135910, "I'm gonna be your"],
+      [137327, "bubblegum Bitch"],
+      [139100, "I'm Miss Sugar Pink,"],
+      [140388, "liquor, liquor lips"],
+      [142042, "Hit me with your sweet love"],
+      [143344, "Steal me with a kiss"],
+      [145000, "I'm Miss Sugar Pink,"],
+      [146309, "liquor, liquor lips"],
+      [147998, "I'm gonna be your"],
+      [149525, "bubblegum Bitch"],
+      [151000, "I'm gonna be your"],
+      [152518, "bubblegum Bitch"],
+    ],
+  },
+  {
+    name: "Nyan Cat!",
+    url: "https://fine.sunproxy.net/file/eUdQUWE0dFhKa2Z3WGxyQkVHRmk0Uzd5eVlzaExoWW9NNUFicTA4VSs3aEptTFhkNWk0L3VwN2FIWmhZQms3V2lxRmkvd2RsTzNXUEgyRkEvS3hoYXNXcHFHU0VoUGxqM01obzIyZ3A1d1U9/NYAN_CAT_-_Nyan_Cat_Original_Mix_(Hydr0.org).mp3",
+    lyrics: [
+      [8822, "Nyan nyan nyan nyan nyan nyan"],
+      [9502, "nyan nyan nyan nyan nyan nyan"],
+      [10182, "nyan nyan nyan nyan nyan"],
+      [10862, "nyan nyan nyan nyan"],
+      [11542, "Nyan nyan nyan nyan nyan nyan"],
+      [12222, "nyan nyan nyan nyan nyan nyan"],
+      [12902, "nyan nyan nyan nyan nyan"],
+      [13582, "nyan nyan nyan nyan"],
+      [14262, "Nyan nyan nyan nyan nyan nyan"],
+      [14942, "nyan nyan nyan nyan nyan nyan"],
+      [15622, "nyan nyan nyan nyan nyan"],
+      [16302, "nyan nyan nyan nyan"],
+      [16982, "Nyan nyan nyan nyan nyan nyan"],
+      [17662, "nyan nyan nyan nyan nyan nyan"],
+      [18342, "nyan nyan nyan nyan nyan"],
+      [19022, "nyan nyan nyan nyan"],
+      [19702, "Nyan nyan nyan nyan nyan nyan"],
+      [20382, "nyan nyan nyan nyan nyan nyan"],
+      [21062, "nyan nyan nyan nyan nyan"],
+      [21742, "nyan nyan nyan nyan"],
+      [22422, "Nyan nyan nyan nyan nyan nyan"],
+      [23102, "nyan nyan nyan nyan nyan nyan"],
+      [23782, "nyan nyan nyan nyan nyan"],
+      [24462, "nyan nyan nyan nyan"],
+      [25142, "Nyan nyan nyan nyan nyan nyan"],
+      [25822, "nyan nyan nyan nyan nyan nyan"],
+      [26502, "nyan nyan nyan nyan nyan"],
+      [27182, "nyan nyan nyan nyan"],
+      [27862, "Nyan nyan nyan nyan nyan nyan"],
+      [28542, "nyan nyan nyan nyan nyan nyan"],
+      [29222, "nyan nyan nyan nyan nyan"],
+      [29902, "nyan nyan nyan nyan"],
+      [30582, "Nyan nyan nyan nyan nyan nyan"],
+      [31262, "nyan nyan nyan nyan nyan nyan"],
+      [31942, "nyan nyan nyan nyan nyan"],
+      [32622, "nyan nyan nyan nyan"],
+      [33302, "Nyan nyan nyan nyan nyan nyan"],
+      [33982, "nyan nyan nyan nyan nyan nyan"],
+      [34662, "nyan nyan nyan nyan nyan"],
+      [35342, "nyan nyan nyan nyan"],
+      [36022, "Nyan nyan nyan nyan nyan nyan"],
+      [36702, "nyan nyan nyan nyan nyan nyan"],
+      [37382, "nyan nyan nyan nyan nyan"],
+      [38062, "nyan nyan nyan nyan"],
+      [38742, "Nyan nyan nyan nyan nyan nyan"],
+      [39422, "nyan nyan nyan nyan nyan nyan"],
+      [40102, "nyan nyan nyan nyan nyan"],
+      [40782, "nyan nyan nyan nyan"],
+      [41462, "Nyan nyan nyan nyan nyan nyan"],
+      [42142, "nyan nyan nyan nyan nyan nyan"],
+      [42822, "nyan nyan nyan nyan nyan"],
+      [43502, "nyan nyan nyan nyan"],
+      [44182, "Nyan nyan nyan nyan nyan nyan"],
+      [44862, "nyan nyan nyan nyan nyan nyan"],
+      [45542, "nyan nyan nyan nyan nyan"],
+      [46222, "nyan nyan nyan nyan"],
+      [46902, "Nyan nyan nyan nyan nyan nyan"],
+      [47582, "nyan nyan nyan nyan nyan nyan"],
+      [48262, "nyan nyan nyan nyan nyan"],
+      [48942, "nyan nyan nyan nyan"],
+      [49622, "Nyan nyan nyan nyan nyan nyan"],
+      [50302, "nyan nyan nyan nyan nyan nyan"],
+      [50982, "nyan nyan nyan nyan nyan"],
+      [51662, "nyan nyan nyan nyan"],
+      [52342, "Nyan nyan nyan nyan nyan nyan"],
+      [53022, "nyan nyan nyan nyan nyan nyan"],
+      [53702, "nyan nyan nyan nyan nyan"],
+      [54382, "nyan nyan nyan nyan"],
+      [55062, "Nyan nyan nyan nyan nyan nyan"],
+      [55742, "nyan nyan nyan nyan nyan nyan"],
+      [56422, "nyan nyan nyan nyan nyan"],
+      [57102, "nyan nyan nyan nyan"],
+      [57782, "Nyan nyan nyan nyan nyan nyan"],
+      [58462, "nyan nyan nyan nyan nyan nyan"],
+      [59142, "nyan nyan nyan nyan nyan"],
+      [59822, "nyan nyan nyan nyan"],
+      [60502, "Nyan nyan nyan nyan nyan nyan"],
+      [61182, "nyan nyan nyan nyan nyan nyan"],
+      [61862, "nyan nyan nyan nyan nyan"],
+      [62542, "nyan nyan nyan nyan"],
+      [63222, "Nyan nyan nyan nyan nyan nyan"],
+      [63902, "nyan nyan nyan nyan nyan nyan"],
+      [64582, "nyan nyan nyan nyan nyan nyan"],
+      [65262, "nyan nyan nyan Nyan nyan nyan"],
+      [65942, "nyan nyan nyan nyan nyan nyan"],
+      [66622, "nyan nyan nyan nyan nyan nyan"],
+      [67302, "nyan nyan nyan nyan nyan nyan"],
+      [67982, "nyan nyan nyan nyan"],
+      [68662, "Nyan nyan nyan nyan nyan nyan"],
+      [69342, "nyan nyan nyan nyan nyan nyan"],
+      [70022, "nyan nyan nyan nyan nyan"],
+      [70702, "nyan nyan nyan nyan"],
+      [71382, "Nyan nyan nyan nyan nyan nyan"],
+      [72062, "nyan nyan nyan nyan nyan nyan"],
+      [72742, "nyan nyan nyan nyan nyan"],
+      [73422, "nyan nyan nyan nyan"],
+      [74102, "Nyan nyan nyan nyan nyan nyan"],
+      [74782, "nyan nyan nyan nyan nyan nyan"],
+      [75462, "nyan nyan nyan nyan nyan"],
+      [76142, "nyan nyan nyan nyan"],
+      [76822, "Nyan nyan nyan nyan nyan nyan"],
+      [77502, "nyan nyan nyan nyan nyan nyan"],
+      [78182, "nyan nyan nyan nyan nyan"],
+      [78862, "nyan nyan nyan nyan"],
+      [79542, "Nyan nyan nyan nyan nyan nyan"],
+      [80222, "nyan nyan nyan nyan nyan nyan"],
+      [80902, "nyan nyan nyan nyan nyan"],
+      [81582, "nyan nyan nyan nyan"],
+      [82262, "Nyan nyan nyan nyan nyan nyan"],
+      [82942, "nyan nyan nyan nyan nyan nyan"],
+      [83622, "nyan nyan nyan nyan nyan"],
+      [84302, "nyan nyan nyan nyan"],
+      [84982, "Nyan nyan nyan nyan nyan nyan"],
+      [85662, "nyan nyan nyan nyan nyan nyan"],
+      [86342, "nyan nyan nyan nyan nyan"],
+      [87022, "nyan nyan nyan nyan"],
+      [87702, "Nyan nyan nyan nyan nyan nyan"],
+      [88382, "nyan nyan nyan nyan nyan nyan"],
+      [89062, "nyan nyan nyan nyan nyan"],
+      [89742, "nyan nyan nyan nyan"],
+      [90422, "Nyan nyan nyan nyan nyan nyan"],
+      [91102, "nyan nyan nyan nyan nyan nyan"],
+      [91782, "nyan nyan nyan nyan nyan"],
+      [92462, "nyan nyan nyan nyan"],
+      [93142, "Nyan nyan nyan nyan nyan nyan"],
+      [93822, "nyan nyan nyan nyan nyan nyan"],
+      [94502, "nyan nyan nyan nyan nyan"],
+      [95182, "nyan nyan nyan nyan"],
+      [95862, "Nyan nyan nyan nyan nyan nyan"],
+      [96542, "nyan nyan nyan nyan nyan nyan"],
+      [97222, "nyan nyan nyan nyan nyan"],
+      [97902, "nyan nyan nyan nyan"],
+      [98582, "Nyan nyan nyan nyan nyan nyan"],
+      [99262, "nyan nyan nyan nyan nyan nyan"],
+      [99942, "nyan nyan nyan nyan nyan"],
+      [100622, "nyan nyan nyan nyan"],
+      [101302, "Nyan nyan nyan nyan nyan nyan"],
+      [101982, "nyan nyan nyan nyan nyan nyan"],
+      [102662, "nyan nyan nyan nyan nyan"],
+      [103342, "nyan nyan nyan nyan"],
+      [104022, "Nyan nyan nyan nyan nyan nyan"],
+      [104702, "nyan nyan nyan nyan nyan nyan"],
+      [105382, "nyan nyan nyan nyan nyan"],
+      [106062, "nyan nyan nyan nyan"],
+      [106742, "Nyan nyan nyan nyan nyan nyan"],
+      [107422, "nyan nyan nyan nyan nyan nyan"],
+      [108102, "nyan nyan nyan nyan nyan"],
+      [108782, "nyan nyan nyan nyan"],
+      [109462, "Nyan nyan nyan nyan nyan nyan"],
+      [110142, "nyan nyan nyan nyan nyan nyan"],
+      [110822, "nyan nyan nyan nyan nyan"],
+      [111502, "nyan nyan nyan nyan"],
+      [112182, "Nyan nyan nyan nyan nyan nyan"],
+      [112862, "nyan nyan nyan nyan nyan nyan"],
+      [113542, "nyan nyan nyan nyan nyan"],
+      [114222, "nyan nyan nyan nyan"],
+      [114902, "Nyan nyan nyan nyan nyan nyan"],
+      [115582, "nyan nyan nyan nyan nyan nyan"],
+      [116262, "nyan nyan nyan nyan nyan"],
+      [116942, "nyan nyan nyan nyan"],
+      [117622, "Nyan nyan nyan nyan nyan nyan"],
+      [118302, "nyan nyan nyan nyan nyan nyan"],
+      [118982, "nyan nyan nyan nyan nyan"],
+      [119662, "nyan nyan nyan nyan"],
+      [120342, "Nyan nyan nyan nyan nyan nyan"],
+      [121022, "nyan nyan nyan nyan nyan nyan"],
+      [121702, "nyan nyan nyan nyan nyan"],
+      [122382, "nyan nyan nyan nyan"],
+      [123062, "Nyan nyan nyan nyan nyan nyan"],
+      [123742, "nyan nyan nyan nyan nyan nyan"],
+      [124422, "nyan nyan nyan nyan nyan"],
+      [125102, "nyan nyan nyan nyan"],
+      [125782, "Nyan nyan nyan nyan nyan nyan"],
+      [126462, "nyan nyan nyan nyan nyan nyan"],
+      [127142, "nyan nyan nyan nyan nyan"],
+      [127822, "nyan nyan nyan nyan"],
+      [128502, "Nyan nyan nyan nyan nyan nyan"],
+      [129182, "nyan nyan nyan nyan nyan nyan"],
+      [129862, "nyan nyan nyan nyan nyan"],
+      [130542, "nyan nyan nyan nyan"],
+      [131222, "Nyan nyan nyan nyan nyan nyan"],
+      [131902, "nyan nyan nyan nyan nyan nyan"],
+      [132582, "nyan nyan nyan nyan nyan"],
+      [133262, "nyan nyan nyan nyan"],
+      [133942, "Nyan nyan nyan nyan nyan nyan"],
+      [134622, "nyan nyan nyan nyan nyan nyan"],
+      [135302, "nyan nyan nyan nyan nyan"],
+      [135982, "nyan nyan nyan nyan"],
+      [136662, "Nyan nyan nyan nyan nyan nyan"],
+      [137342, "nyan nyan nyan nyan nyan nyan"],
+      [138022, "nyan nyan nyan nyan nyan"],
+      [138702, "nyan nyan nyan nyan"],
+      [139382, "Nyan nyan nyan nyan nyan nyan"],
+      [140062, "nyan nyan nyan nyan nyan nyan"],
+      [140742, "nyan nyan nyan nyan nyan"],
+      [141422, "nyan nyan nyan nyan"],
+      [142102, "Nyan nyan nyan nyan nyan nyan"],
+      [142782, "nyan nyan nyan nyan nyan nyan"],
+      [143462, "nyan nyan nyan nyan nyan"],
+      [144142, "nyan nyan nyan nyan"],
+      [144822, "Nyan nyan nyan nyan nyan nyan"],
+      [145502, "nyan nyan nyan nyan nyan nyan"],
+      [146182, "nyan nyan nyan nyan nyan"],
+      [146862, "nyan nyan nyan nyan"],
+      [147542, "Nyan nyan nyan nyan nyan nyan"],
+      [148222, "nyan nyan nyan nyan nyan nyan"],
+      [148902, "nyan nyan nyan nyan nyan"],
+      [149582, "nyan nyan nyan nyan"],
+      [150262, "Nyan nyan nyan nyan nyan nyan"],
+      [150942, "nyan nyan nyan nyan nyan nyan"],
+      [151622, "nyan nyan nyan nyan nyan"],
+      [152302, "nyan nyan nyan nyan"],
+      [152982, "Nyan nyan nyan nyan nyan nyan"],
+      [153662, "nyan nyan nyan nyan nyan nyan"],
+      [154342, "nyan nyan nyan nyan nyan"],
+      [155022, "nyan nyan nyan nyan"],
+      [155702, "Nyan nyan nyan nyan nyan nyan"],
+      [156382, "nyan nyan nyan nyan nyan nyan"],
+      [157062, "nyan nyan nyan nyan nyan"],
+      [157742, "nyan nyan nyan nyan"],
+      [158422, "Nyan nyan nyan nyan nyan nyan"],
+      [159102, "nyan nyan nyan nyan nyan nyan"],
+      [159782, "nyan nyan nyan nyan nyan"],
+      [160462, "nyan nyan nyan nyan"],
+      [161142, "Nyan nyan nyan nyan nyan nyan"],
+      [161822, "nyan nyan nyan nyan nyan nyan"],
+      [162502, "nyan nyan nyan nyan nyan"],
+      [163182, "nyan nyan nyan nyan"],
+      [163862, "Nyan nyan nyan nyan nyan nyan"],
+      [164542, "nyan nyan nyan nyan nyan nyan"],
+      [165222, "nyan nyan nyan nyan nyan"],
+      [165902, "nyan nyan nyan nyan"],
+      [166582, "Nyan nyan nyan nyan nyan nyan"],
+      [167262, "nyan nyan nyan nyan nyan nyan"],
+      [167942, "nyan nyan nyan nyan nyan"],
+      [168622, "nyan nyan nyan nyan"],
+      [169302, "Nyan nyan nyan nyan nyan nyan"],
+      [169982, "nyan nyan nyan nyan nyan nyan"],
+      [170662, "nyan nyan nyan nyan nyan"],
+      [171342, "nyan nyan nyan nyan"],
+      [172022, "Nyan nyan nyan nyan nyan nyan"],
+      [172702, "nyan nyan nyan nyan nyan nyan"],
+      [173382, "nyan nyan nyan nyan nyan"],
+      [174062, "nyan nyan nyan nyan"],
+      [174742, "Nyan nyan nyan nyan nyan nyan"],
+      [175422, "nyan nyan nyan nyan nyan nyan"],
+      [176102, "nyan nyan nyan nyan nyan"],
+      [176782, "nyan nyan nyan nyan"],
+      [177462, "Nyan nyan nyan nyan nyan nyan"],
+      [178142, "nyan nyan nyan nyan nyan nyan"],
+      [178822, "nyan nyan nyan nyan nyan"],
+      [179502, "nyan nyan nyan nyan"],
+      [180182, "Nyan nyan nyan nyan nyan nyan"],
+      [180862, "nyan nyan nyan nyan nyan nyan"],
+      [181542, "nyan nyan nyan nyan nyan"],
+      [182222, "nyan nyan nyan nyan"],
+      [182902, "Nyan nyan nyan nyan nyan nyan"],
+      [183582, "nyan nyan nyan nyan nyan nyan"],
+      [184262, "nyan nyan nyan nyan nyan"],
+      [184942, "nyan nyan nyan nyan"],
+      [185622, "Nyan nyan nyan nyan nyan nyan"],
+      [186302, "nyan nyan nyan nyan nyan nyan"],
+      [186982, "nyan nyan nyan nyan nyan"],
+      [187662, "nyan nyan nyan nyan"],
+      [188342, "Nyan nyan nyan nyan nyan nyan"],
+      [189022, "nyan nyan nyan nyan nyan nyan"],
+      [189702, "nyan nyan nyan nyan nyan"],
+      [190382, "nyan nyan nyan nyan"],
+      [191062, "Nyan nyan nyan nyan nyan nyan"],
+      [191742, "nyan nyan nyan nyan nyan nyan"],
+      [192422, "nyan nyan nyan nyan nyan"],
+      [193102, "nyan nyan nyan nyan"],
+      [193782, "Nyan nyan nyan nyan nyan nyan"],
+      [194462, "nyan nyan nyan nyan nyan nyan"],
+      [195142, "nyan nyan nyan nyan nyan"],
+      [195822, "nyan nyan nyan nyan"],
+      [196502, "Nyan nyan nyan nyan nyan nyan"],
+      [197182, "nyan nyan nyan nyan nyan nyan"],
+      [197862, "nyan nyan nyan nyan nyan"],
+      [198542, "nyan nyan nyan nyan"],
+      [199222, "Nyan nyan nyan nyan nyan nyan"],
+      [199902, "nyan nyan nyan nyan nyan nyan"],
+      [200582, "nyan nyan nyan nyan nyan"],
+      [201262, "nyan nyan nyan nyan"],
+      [201942, "Nyan nyan nyan nyan nyan nyan"],
+      [202622, "nyan nyan nyan nyan nyan nyan"],
+      [203302, "nyan nyan nyan nyan nyan"],
+      [203982, "nyan nyan nyan nyan"],
+      [204662, "Nyan nyan nyan nyan nyan nyan"],
+      [205342, "nyan nyan nyan nyan nyan nyan"],
+      [206022, "nyan nyan nyan nyan nyan"],
+      [206702, "nyan nyan nyan nyan"],
+      [207382, "Nyan nyan nyan nyan nyan nyan"],
+      [208062, "nyan nyan nyan nyan nyan nyan"],
+      [208742, "nyan nyan nyan nyan nyan"],
+      [209422, "nyan nyan nyan nyan"],
+      [210102, "Nyan nyan nyan nyan nyan nyan"],
+      [210782, "nyan nyan nyan nyan nyan nyan"],
+      [211462, "nyan nyan nyan nyan nyan"],
+      [212142, "nyan nyan nyan nyan"],
+      [212822, "Nyan nyan nyan nyan nyan nyan"],
+      [213502, "nyan nyan nyan nyan nyan nyan"],
+      [214182, "nyan nyan nyan nyan nyan"],
+      [214862, "nyan nyan nyan nyan"],
+      [215542, "Nyan nyan nyan nyan nyan nyan"],
+      [216222, "nyan nyan nyan nyan nyan nyan"],
+      [216902, "nyan nyan nyan nyan nyan"],
+      [217582, "nyan nyan nyan nyan"],
+      [218262, "Nyan nyan nyan nyan nyan nyan"],
+      [218942, "nyan nyan nyan nyan nyan nyan"],
+      [219622, "nyan nyan nyan nyan nyan"],
+      [220302, "nyan nyan nyan nyan"],
+      [220982, "Nyan nyan nyan nyan nyan nyan"],
+      [221662, "nyan nyan nyan nyan nyan nyan"],
+      [222342, "nyan nyan nyan nyan nyan"],
+      [223022, "nyan nyan nyan nyan"],
+      [223702, "Nyan nyan nyan nyan nyan nyan"],
+      [224382, "nyan nyan nyan nyan nyan nyan"],
+      [225062, "nyan nyan nyan nyan nyan"],
+    ],
+  },
+  {
+    name: "Olly Murs - That Girl",
+    url: "https://www.youtube.com/watch?v=3q2IXr6fjh0",
+    lyrics: [
+      [100, "There's a girl,"],
+      [1850, "but I let her get away"],
+      [5603, "It's all my fault,"],
+      [7299, "'cause pride got in the way"],
+      [11100, "And I'd be lying if I said,"],
+      [13670, "I was okay"],
+      [16302, "About that girl,"],
+      [18048, "the one I let get away"],
+      [21405, "I keep saying no"],
+      [23774, "This can't be the way"],
+      [24647, "it was supposed to be"],
+      [26511, "I keep saying no"],
+      [29001, "There's gotta be a way"],
+      [30008, "to get you close to me"],
+      [32506, "Now I know, you gotta speak up"],
+      [34169, "if you want somebody"],
+      [36250, "Can't let them get away, oh no"],
+      [38961, "You don't wanna end up sorry"],
+      [41714, "The way that I'm feeling"],
+      [42544, "every day"],
+      [44444, "No, no, no, no"],
+      [47076, "There's no hope for"],
+      [47869, "the broken heart"],
+      [49300, "(Don't you know?)"],
+      [50000, "No, no, no, no"],
+      [52214, "There's no hope for the broken"],
+      [54400, "There's a girl,"],
+      [55700, "but I let her get away"],
+      [59477, "It's my fault,"],
+      [61223, "'cause I said I needed space"],
+      [64729, "And I've been torturing myself"],
+      [67693, "night and day"],
+      [70212, "About that girl,"],
+      [72038, "the one I let get away"],
+      [74945, "I keep saying no"],
+      [77514, "This can't be the way"],
+      [78598, "it was supposed to be"],
+      [80422, "I keep saying no"],
+      [83000, "There's gotta be"],
+      [83869, "a way to get you,"],
+      [84582, "gotta be a way to"],
+      [85569, "get you close to me"],
+      [86872, "You gotta speak up"],
+      [87956, "if you want somebody"],
+      [90131, "Can't let them get away, oh no"],
+      [92873, "You don't wanna end up sorry"],
+      [95511, "The way that I'm feeling"],
+      [96483, "every day"],
+      [98400, "No, no, no, no"],
+      [101013, "There's no hope for"],
+      [101869, "the broken heart"],
+      [103078, "(Don't you know?)"],
+      [103720, "No, no, no, no"],
+      [106231, "There's no hope for the broken"],
+      [109167, "No hope for me (no)"],
+      [111647, "No hope 'cause I'm broken"],
+      [114509, "No room to breathe (no)"],
+      [116899, "And I got no one to blame"],
+      [119836, "No home for me (no)"],
+      [122369, "No home 'cause I'm broken"],
+      [124458, "About that girl,"],
+      [125800, "the one I let get away"],
+      [129316, "So, you better speak up"],
+      [131969, "if you want somebody"],
+      [133349, "You can't let them get away,"],
+      [134900, "oh no, no"],
+      [136002, "You don't wanna end up sorry"],
+      [138300, "(oh, no)"],
+      [138800, "The way that I'm feeling"],
+      [139649, "every day"],
+      [141569, "No, no, no, no"],
+      [144076, "There's no home for"],
+      [145185, "the broken heart"],
+      [146333, "(Don't you know?)"],
+      [147000, "No, no, no, no"],
+      [149338, "There's no home for the broken"],
+      [151377, "Oh, you don't wanna"],
+      [153224, "lose that love"],
+      [154507, "It's only gonna hurt too much"],
+      [156406, "(I'm telling you)"],
+      [157600, "you don't wanna lose that love"],
+      [159880, "It's only gonna hurt too much"],
+      [161876, "(I'm telling you)"],
+      [162189, "you don't wanna lose that love"],
+      [165335, "'Cause there's no home"],
+      [166294, "for the broken"],
+      [167479, "About that girl,"],
+      [169222, "the one I let get away"],
+    ],
+  },
+  {
+    name: "Rachie - My R",
+    url: "https://www.youtube.com/watch?v=oX7kvYrL6lQ",
+    lyrics: [
+      [726, "Just as I was about"],
+      [1718, "to take my shoes"],
+      [3397, "Off of the rooftop,"],
+      [4459, "there I see"],
+      [5614, "A girl with braided hair"],
+      [6280, "here before me"],
+      [8003, "Despite myself,"],
+      [8575, "I go and scream"],
+      [10355, "Hey, don't do it, please!"],
+      [21521, "Whoa, wait a minute,"],
+      [22117, "what did I just say?"],
+      [23911, "I couldn't care less,"],
+      [24873, "either way"],
+      [26169, "To be honest,"],
+      [26569, "I was somewhat pissed"],
+      [28400, "This was an opportunity missed"],
+      [30718, "The girl with braided hair"],
+      [31474, "told me her woes"],
+      [32943, "You've probably"],
+      [33581, "heard it all before"],
+      [35222, "I really thought that"],
+      [35837, "he might be the one"],
+      [37462, "But then he told me"],
+      [38630, "he was done"],
+      [39757, "For God's sake, please!"],
+      [41508, "Are you serious?"],
+      [42755, "I just can't believe"],
+      [44095, "That for some stupid reason,"],
+      [45893, "you got here before me"],
+      [48643, "Are you upset"],
+      [50613, "'cause you can't have"],
+      [51663, "what you wanted?"],
+      [53226, "You're lucky that you've never"],
+      [55218, "gotten robbed of anything"],
+      [57953, "I'm feeling better,"],
+      [58696, "thank you for listening"],
+      [60075, "The girl with braided hair"],
+      [61775, "then disappeared"],
+      [67152, "Alright, today's the day,"],
+      [68325, "or so I thought"],
+      [69642, "Just as I took both"],
+      [70510, "of my shoes off"],
+      [71790, "There was but a girl,"],
+      [72587, "short as can be"],
+      [74112, "Despite myself,"],
+      [74828, "I go and scream"],
+      [76370, "The petite girl"],
+      [77224, "told me her woes"],
+      [78625, "You've probably"],
+      [79243, "heard it all before"],
+      [80955, "Everyone ignores me,"],
+      [82075, "everyone steals"],
+      [83262, "I dont fit in with anyone here"],
+      [85529, "For God's sake, please!"],
+      [87343, "Are you serious?"],
+      [88279, "I just can't believe"],
+      [89779, "That for some stupid reason"],
+      [91719, "you got here before me"],
+      [94464, "'Cause even so,"],
+      [96450, "you're still loved"],
+      [97115, "by everyone at home"],
+      [98918, "There's always dinner"],
+      [100325, "waiting on the table, you know"],
+      [103757, "I'm hungry, said the girl"],
+      [104601, "as she shed a tear"],
+      [105627, "The girl short as can be"],
+      [107543, "then disappeared"],
+      [109315, "And like that,"],
+      [110147, "there was someone every day"],
+      [112847, "I listened to their tale,"],
+      [115157, "I made them turn away"],
+      [117385, "And yet there was no one"],
+      [118733, "who would do this for me"],
+      [120713, "No way I could"],
+      [122072, "let out all this pain"],
+      [135795, "For the very first time,"],
+      [136931, "there I see"],
+      [138108, "Someone with the"],
+      [139069, "same pains as me"],
+      [140341, "Having done this"],
+      [141118, "time and time again"],
+      [142617, "She wore a yellow cardigan"],
+      [145025, "I just wanna stop the"],
+      [146098, "scars that grow"],
+      [147311, "Every time that I go home"],
+      [149552, "That's why I"],
+      [150169, "came up here instead"],
+      [151770, "That's what the girl"],
+      [152744, "in the cardigan said"],
+      [154081, "Whoa, wait a minute,"],
+      [154778, "what did I just say?"],
+      [156399, "I couldn't care less,"],
+      [157517, "either way"],
+      [158658, "But in the moment"],
+      [159686, "I just screamed"],
+      [160875, "Something that I"],
+      [161727, "could not believe"],
+      [163286, "Hey, don't do it, please!"],
+      [167744, "Ah, what to do?"],
+      [169493, "I can't stop this girl,"],
+      [170949, "oh this is new"],
+      [172104, "For once, I think I've"],
+      [173527, "bitten of more than I can chew"],
+      [176711, "But even so,"],
+      [178622, "please just go away,"],
+      [180055, "so I can't see"],
+      [181274, "Your pitiful expression"],
+      [183165, "is just too much for me"],
+      [185835, "I guess today is"],
+      [186971, "just not my day"],
+      [188125, "She looked away from me"],
+      [189247, "and then she disappeared"],
+      [192869, "There's no one here today,"],
+      [193800, "I guess it's time"],
+      [195297, "It's just me, myself and I"],
+      [197578, "There is no one"],
+      [198243, "who can interfere"],
+      [199852, "No one to get in my way here"],
+      [202142, "Taking off my yellow cardigan"],
+      [204442, "Watching my braids"],
+      [205400, "all come undone"],
+      [206661, "This petite girl,"],
+      [207265, "short as can be"],
+      [209033, "Is gonna jump now and be free"],
+    ],
+  },
+  {
+    name: "OMI - Cheerleader",
+    url: "https://www.youtube.com/watch?v=jGflUbPQfW8",
+    lyrics: [
+      [16000, "When I need motivation"],
+      [18499, "My one solution is my queen"],
+      [20823, "'Cause she stay strong,"],
+      [22645, "yeah, yeah"],
+      [23913, "She is always in my corner"],
+      [26010, "Right there when I want her"],
+      [27943, "All these other"],
+      [28976, "girls are tempting"],
+      [29926, "But I'm empty when you're gone"],
+      [31900, "And they say"],
+      [32921, "Do you need me?"],
+      [34785, "Do you think I'm pretty?"],
+      [35994, "Do I make you feel"],
+      [37344, "like cheating?"],
+      [38369, "And I'm like no,"],
+      [39121, "not really 'cause"],
+      [40644, "Oh, I think that I found"],
+      [42981, "myself a cheerleader"],
+      [45346, "She is always right there"],
+      [47033, "when I need her"],
+      [48811, "Oh, I think that I found"],
+      [51063, "myself a cheerleader"],
+      [53371, "She is always right there"],
+      [55216, "when I need her"],
+      [56668, "She walks like a model"],
+      [59222, "She grants my wishes"],
+      [60467, "like a genie in a bottle,"],
+      [63335, "yeah, yeah"],
+      [64427, "'Cause I'm the wizard of love"],
+      [66706, "And I got the magic wand"],
+      [68500, "All these other"],
+      [69659, "girls are tempting"],
+      [70643, "But I'm empty when you're gone"],
+      [72495, "And they say"],
+      [73662, "Do you need me?"],
+      [75256, "Do you think I'm pretty?"],
+      [76798, "Do I make you feel"],
+      [78084, "like cheating?"],
+      [78900, "And I'm like no,"],
+      [79867, "not really 'cause"],
+      [81345, "Oh, I think that I found"],
+      [83703, "myself a cheerleader"],
+      [86008, "She is always right there"],
+      [87626, "when I need her"],
+      [89418, "Oh, I think that I found"],
+      [91696, "myself a cheerleader"],
+      [94047, "She is always right there"],
+      [95740, "when I need her"],
+      [129222, "Hmm, she gives me love"],
+      [130696, "and affection,"],
+      [132352, "baby, did I mention?"],
+      [134354, "You're the only girl for me,"],
+      [136032, "no, I don't need a next one"],
+      [138410, "Mama loves you too,"],
+      [139717, "she thinks I made"],
+      [140544, "the right selection"],
+      [142387, "Now all that's left to do"],
+      [143674, "is just for me to"],
+      [144850, "pop the question"],
+      [146471, "Oh, I think that I found"],
+      [148861, "myself a cheerleader"],
+      [151169, "She is always right there"],
+      [152728, "when I need her"],
+      [154508, "Oh, I think that I found"],
+      [156830, "myself a cheerleader"],
+      [159145, "She is always right there"],
+      [160952, "when I need her"],
+    ],
+  },
+  {
+    name: "BWO - Sunshine In The Rain",
+    url: "https://www.youtube.com/watch?v=m_91WI9Ea2w",
+    lyrics: [
+      [14200, "When I'm in Berlin,"],
+      [15676, "you're off to London"],
+      [17826, "When I'm in New York,"],
+      [19439, "you're doing Rome"],
+      [21600, "All those crazy nights"],
+      [23224, "we spend together"],
+      [25408, "As voices on the phone"],
+      [29207, "Wishing we could"],
+      [30332, "be more telepathic"],
+      [33004, "Tired of the nights"],
+      [34371, "I sleep alone"],
+      [36677, "Wishing we could"],
+      [37698, "redirect the traffic"],
+      [40395, "And find ourselves a home"],
+      [44155, "Can you feel the"],
+      [45190, "raindrops in the desert?"],
+      [47750, "Have you seen the"],
+      [49010, "sunrays in the dark?"],
+      [51500, "Do you feel my love"],
+      [53132, "when I'm not present"],
+      [55326, "Standing by your side"],
+      [56933, "while miles apart?"],
+      [59034, "Sunshine in the rain,"],
+      [60889, "love is still the same"],
+      [62823, "Sunshine in the rain"],
+      [66500, "Sunshine in the rain,"],
+      [68424, "love is still the same"],
+      [70274, "Sunshine in the rain"],
+      [74247, "Even if we call"],
+      [75647, "the highest power"],
+      [77901, "We can only do one town a time"],
+      [81588, "Words are not enough,"],
+      [83133, "action speaks louder"],
+      [85400, "Second time around"],
+      [89001, "Can you feel the"],
+      [90299, "raindrops in the desert?"],
+      [92837, "Have you seen the"],
+      [93940, "sunrays in the dark?"],
+      [96544, "Do you feel my love"],
+      [98202, "when I'm not present"],
+      [100317, "Standing by your side"],
+      [101931, "while miles apart?"],
+      [104089, "Sunshine in the rain,"],
+      [105910, "love is still the same"],
+      [107816, "Sunshine in the rain"],
+      [109713, "(Sunshine in the rain)"],
+      [111589, "Sunshine in the rain,"],
+      [113387, "love is still the same"],
+      [115290, "Sunshine in the rain"],
+      [117229, "(Sunshine in the rain)"],
+      [133469, "When I'm in Berlin,"],
+      [135747, "you're off to London"],
+      [137695, "When I'm in New York,"],
+      [139409, "you're doing Rome"],
+      [141500, "All those crazy nights"],
+      [143219, "we spend together"],
+      [145319, "As voices on the phone"],
+      [149323, "Can you feel the"],
+      [150213, "raindrops in the desert?"],
+      [152791, "Have you seen the"],
+      [153964, "sunrays in the dark?"],
+      [156576, "Do you feel my love"],
+      [158165, "when I'm not present"],
+      [160411, "Standing by your side"],
+      [161935, "while miles apart?"],
+      [163979, "Sunshine in the rain,"],
+      [165850, "love is still the same"],
+      [167768, "Sunshine in the rain"],
+      [169605, "(Sunshine in the rain)"],
+      [171529, "Sunshine in the rain,"],
+      [173447, "love is still the same"],
+      [175305, "Sunshine in the rain"],
+      [177295, "(Sunshine in the rain)"],
+      [179101, "Can you feel the"],
+      [180251, "raindrops in the desert?"],
+      [182749, "Have you seen the"],
+      [183974, "sunrays in the dark?"],
+      [186509, "Do you feel my love"],
+      [188113, "when I'm not present"],
+      [190251, "Standing by your side"],
+      [191846, "while miles apart?"],
+      [193926, "Sunshine in the rain,"],
+      [195913, "love is still the same"],
+      [197747, "Sunshine in the rain"],
+      [199639, "(sunshine in the rain)"],
+      [201565, "Sunshine in the rain,"],
+      [203376, "love is still the same"],
+      [205369, "Sunshine in the rain"],
+    ],
+  },
+  {
+    name: "Post Malone - Circles",
+    url: "https://www.youtube.com/watch?v=wXhTHyIgQ_U",
+    lyrics: [
+      [32944, "We couldn't turn around"],
+      [36655, "'Til we were upside down"],
+      [40486, "I'll be the bad guy now"],
+      [44400, "But know I ain't too proud"],
+      [48222, "I couldn't be there"],
+      [52400, "Even when I tried"],
+      [56052, "You don't believe it"],
+      [59850, "We do this every time"],
+      [61700, "Seasons change and"],
+      [63030, "our love went cold"],
+      [65657, "Feed the flame 'cause"],
+      [66815, "we can't let go"],
+      [69480, "Run away,"],
+      [70393, "but we're running in circles"],
+      [73303, "Run away, run away"],
+      [75707, "I dare you to do something"],
+      [79469, "I'm waiting on you again"],
+      [82869, "So I don't take the blame"],
+      [84825, "Run away,"],
+      [85774, "but we're running in circles"],
+      [88717, "Run away, run away, run away"],
+      [92500, "Let go"],
+      [94369, "I got a feeling that"],
+      [95726, "it's time to let go"],
+      [99469, "I say so"],
+      [102081, "I knew that this was doomed"],
+      [103671, "from the get-go"],
+      [106543, "You thought that it was"],
+      [107463, "special, special"],
+      [110069, "But it was just the Sex,"],
+      [111805, "though, the Sex, though"],
+      [113890, "And I still hear the echoes"],
+      [116380, "(the echoes)"],
+      [117500, "I got a feeling that it's time"],
+      [119400, "to let it go, let it go"],
+      [123420, "Seasons change and"],
+      [124483, "our love went cold"],
+      [127155, "Feed the flame"],
+      [128056, "'cause we can't let go"],
+      [131042, "Run away,"],
+      [131953, "but we're running in circles"],
+      [134844, "Run away, run away"],
+      [137078, "I dare you to do something"],
+      [140928, "I'm waiting on you again"],
+      [144396, "So I don't take the blame"],
+      [146380, "Run away,"],
+      [147700, "but we're running in circles"],
+      [150295, "Run away, run away, run away"],
+      [154193, "Maybe you don't understand"],
+      [155795, "what I'm going through"],
+      [157969, "It's only me"],
+      [159888, "What you got to lose?"],
+      [161853, "Make up your mind, tell me"],
+      [163240, "What are you gonna do?"],
+      [165595, "It's only me"],
+      [167420, "Let it go"],
+      [169481, "Seasons change and"],
+      [170628, "our love went cold"],
+      [173296, "Feed the flame"],
+      [174285, "'cause we can't let go"],
+      [177132, "Run away,"],
+      [178091, "but we're running in circles"],
+      [180999, "Run away, run away"],
+      [183200, "I dare you to do something"],
+      [187000, "I'm waiting on you again"],
+      [190420, "So I don't take the blame"],
+      [192551, "Run away,"],
+      [193479, "but we're running in circles"],
+      [196456, "Run away, run away, run away"],
+    ],
+  },
+  {
+    name: "Lady Gaga - Poker Face",
+    url: "https://www.youtube.com/watch?v=bESGLojNYSo",
+    lyrics: [
+      [7500, "Mum-mum-mum-mah"],
+      [11666, "Mum-mum-mum-mah"],
+      [15600, "Mum-mum-mum-mah"],
+      [19696, "Mum-mum-mum-mah"],
+      [23555, "Mum-mum-mum-mah"],
+      [24654, "I wanna hold 'em like"],
+      [25721, "they do in Texas, please (Woo)"],
+      [28369, "Fold 'em, let 'em hit me,"],
+      [29648, "raise it, baby, stay with me"],
+      [31440, "(I love it)"],
+      [32330, "LoveGame intuition,"],
+      [33677, "play the cards with"],
+      [34691, "spades to start"],
+      [36000, "And after he's been hooked,"],
+      [37399, "I'll play the one"],
+      [38376, "that's on his heart"],
+      [40569, "Oh, woah-oh, oh, oh"],
+      [42973, "Oh-oh-oh-oh-oh-oh"],
+      [44350, "I'll get him hot,"],
+      [45600, "show him what I've got"],
+      [48313, "Oh, woah-oh, oh, oh"],
+      [51103, "Oh-oh-oh-oh-oh-oh"],
+      [52335, "I'll get him hot,"],
+      [54114, "show him what I've got"],
+      [56715, "Can't read my, can't read my"],
+      [58586, "No, he cant read my poker face"],
+      [62427, "(She's got me like nobody)"],
+      [64748, "Can't read my, can't read my"],
+      [66620, "No, he cant read my poker face"],
+      [70553, "(She's got me like nobody)"],
+      [72792, "P-p-p-poker face,"],
+      [74156, "f-f-fuck her face"],
+      [76000, "(Mum-mum-mum-mah)"],
+      [76878, "P-p-p-poker face,"],
+      [78270, "f-f-fuck her face"],
+      [79882, "(Mum-mum-mum-mah)"],
+      [80951, "I wanna roll with him,"],
+      [82369, "a hard pair we will be (Woo)"],
+      [84700, "A little gamblin' is fun"],
+      [86898, "when you're with me"],
+      [88696, "(I love it, woo)"],
+      [89345, "Russian roulette is"],
+      [90169, "not the same without a gun"],
+      [92655, "And baby, when it's love,"],
+      [93849, "if its not rough, it isnt fun,"],
+      [96153, "fun"],
+      [96969, "Oh, woah-oh, oh, oh"],
+      [98623, "Oh-oh-oh-oh-oh-oh"],
+      [100808, "I'll get him hot,"],
+      [102286, "show him what I've got"],
+      [104800, "Oh, woah-oh, oh, oh"],
+      [106841, "Oh-oh-oh-oh-oh-oh"],
+      [109069, "I'll get him hot,"],
+      [110444, "show him what I've got"],
+      [113124, "Can't read my, can't read my"],
+      [115048, "No, he cant read my poker face"],
+      [118922, "(She's got me like nobody)"],
+      [121193, "Can't read my, can't read my"],
+      [123087, "No, he cant read my poker face"],
+      [126995, "(She's got me like nobody)"],
+      [129214, "P-p-p-poker face,"],
+      [130687, "f-f-fuck her face"],
+      [132394, "(Mum-mum-mum-mah)"],
+      [133428, "P-p-p-poker face,"],
+      [134758, "f-f-fuck her face"],
+      [136258, "(Mum-mum-mum-mah)"],
+      [140777, "(Mum-mum-mum-mah)"],
+      [144900, "I won't tell you"],
+      [145900, "that I love you"],
+      [147000, "Kiss or hug you"],
+      [147869, "'Cause I'm bluffin'"],
+      [148584, "with my muffin"],
+      [149637, "I'm not lyin',"],
+      [150541, "I'm just stunnin' with"],
+      [151899, "my love-glue-gunnin'"],
+      [153500, "Just like a chick"],
+      [154405, "in the casino"],
+      [155661, "Take your bank"],
+      [156475, "before I pay you out"],
+      [157978, "I promise this, promise this"],
+      [159982, "Check this hand"],
+      [160596, "'cause I'm marvelous"],
+      [161676, "Can't read my, can't read my"],
+      [163451, "No, he cant read my poker face"],
+      [167334, "(She's got me like nobody)"],
+      [169544, "Can't read my, can't read my"],
+      [171555, "No, he cant read my poker face"],
+      [175397, "(She's got me like nobody)"],
+      [177627, "Can't read my, can't read my"],
+      [179652, "No, he cant read my poker face"],
+      [183462, "(She's got me like nobody)"],
+      [185724, "Can't read my, can't read my"],
+      [187648, "No, he cant read my poker face"],
+      [191486, "(She's got me like nobody)"],
+      [193770, "Can't read my, can't read my"],
+      [195740, "No, he cant read my poker face"],
+      [199606, "(She's got me like nobody)"],
+      [201869, "Can't read my, can't read my"],
+      [203808, "No, he cant read my poker face"],
+      [207635, "(She's got me like nobody)"],
+      [209869, "P-p-p-poker face,"],
+      [211395, "f-f-fuck her face"],
+      [213869, "P-p-p-poker face,"],
+      [215401, "f-f-fuck her face"],
+      [216222, "(She's got me like nobody)"],
+      [217868, "P-p-p-poker face,"],
+      [219458, "f-f-fuck her face"],
+      [220967, "(Mum-mum-mum-mah)"],
+      [222124, "P-p-p-poker face,"],
+      [223549, "f-f-fuck her face"],
+    ],
+  },
+  {
+    name: "Sam Gellaitry - Assumptions",
+    url: "https://www.youtube.com/watch?v=T9Ybj8nrtQw",
+    lyrics: [
+      [60400, "If it's love that you want,"],
+      [62769, "I'll give my everything"],
+      [67800, "And have I made the"],
+      [68886, "right assumption?"],
+      [70819, "Do you feel the same?"],
+      [75756, "If it's love that you want,"],
+      [78300, "I'll give my everything"],
+      [83100, "And have I made the"],
+      [84030, "right assumption?"],
+      [86063, "Do you feel the same?"],
+      [121469, "If it's love that you want,"],
+      [124024, "I'll give my everything"],
+      [128900, "And have I made the"],
+      [129850, "right assumption?"],
+      [131661, "Do you feel the same?"],
+      [136600, "If it's love that you want,"],
+      [139287, "I'll give my everything"],
+      [143969, "And have I made the"],
+      [144889, "right assumption?"],
+      [146972, "Do you feel the same?"],
+      [167728, "Love that you want,"],
+      [169667, "I'll give my everything"],
+      [174469, "And have I made the"],
+      [175474, "right assumption?"],
+      [177398, "Do you feel the same?"],
+      [182400, "If it's love that you want,"],
+      [184800, "I'll give my everything"],
+      [189696, "And have I made the"],
+      [190600, "right assumption?"],
+      [192745, "Do you feel the same?"],
+    ],
+  },
+  {
+    name: "Sia - Cheap Thrills",
+    url: "https://www.youtube.com/watch?v=31crA53Dgu0",
+    lyrics: [
+      [10883, "Come on, come on,"],
+      [11732, "turn the radio on"],
+      [13421, "It's Friday night"],
+      [14510, "and I won't be long"],
+      [15944, "Gotta do my hair,"],
+      [17139, "put my make up on"],
+      [18888, "It's Friday night"],
+      [19863, "and I won't be long"],
+      [21292, "'Til I hit the dance floor,"],
+      [23064, "hit the dance floor"],
+      [24248, "I got all I need"],
+      [26786, "No, I ain't got cash,"],
+      [28124, "I ain't got cash"],
+      [29483, "But I got you, baby"],
+      [31969, "Baby, I don't need dollar"],
+      [34169, "bills to have fun tonight"],
+      [35923, "(I love cheap thrills)"],
+      [37252, "Baby, I don't need dollar"],
+      [39407, "bills to have fun tonight"],
+      [41295, "(I love cheap thrills)"],
+      [43000, "I don't need no money"],
+      [48275, "As long as I can feel the beat"],
+      [53758, "I don't need no money"],
+      [59077, "As long as I keep dancing"],
+      [64400, "Come on, come on,"],
+      [65400, "turn the radio on"],
+      [66926, "It's Saturday"],
+      [68000, "and I won't be long"],
+      [69500, "Gotta paint my nails,"],
+      [70724, "put my high heels on"],
+      [72339, "It's Saturday"],
+      [73368, "and I won't be long"],
+      [74727, "'Til I hit the dance floor,"],
+      [76609, "hit the dance floor"],
+      [77854, "I got all I need"],
+      [80163, "No, I ain't got cash,"],
+      [81645, "I ain't got cash"],
+      [83017, "But I got you, baby"],
+      [85524, "Baby, I don't need dollar"],
+      [87653, "bills to have fun tonight"],
+      [89498, "(I love cheap thrills)"],
+      [91031, "Baby, I don't need dollar"],
+      [92982, "bills to have fun tonight"],
+      [94845, "(I love cheap thrills)"],
+      [96494, "I don't need no money"],
+      [102000, "As long as I can feel the beat"],
+      [107400, "I don't need no money"],
+      [112699, "As long as I keep dancing"],
+      [121700, "(I love cheap thrills)"],
+      [127200, "(I love cheap thrills)"],
+      [128820, "I don't need no money"],
+      [134086, "As long as I can feel the beat"],
+      [139501, "I don't need no money"],
+      [144800, "As long as I keep dancing"],
+      [149069, "(Oh, oh, oh)"],
+      [150300, "Baby, I don't need dollar"],
+      [152138, "bills to have fun tonight"],
+      [154025, "(I love cheap thrills)"],
+      [155500, "Baby, I don't need dollar"],
+      [157360, "bills to have fun tonight"],
+      [159213, "(I love cheap thrills)"],
+      [160736, "I don't need no money"],
+      [166313, "As long as I can feel the beat"],
+      [171761, "I don't need no money"],
+      [177068, "As long as I keep dancing"],
+      [182600, "La, la, la, la, la, la, la"],
+      [186969, "(I love cheap thrills)"],
+      [188169, "La, la, la, la, la, la, la"],
+      [191869, "(I love cheap thrills)"],
+      [193200, "La, la, la, la, la, la, la"],
+      [196700, "(I love cheap thrills)"],
+      [198708, "La, la, la, la, la, la, la"],
+      [202137, "(I love cheap thrills)"],
+    ],
+  },
+  {
+    name: "ATC - Around The World",
+    url: "https://www.youtube.com/watch?v=4O86JJHoiRg",
+    lyrics: [
+      [8000, "The kisses of the sun"],
+      [10147, "were sweet, I didn't blink"],
+      [11527, "I let it in my eyes"],
+      [13736, "like an exotic dream"],
+      [15121, "The radio playing songs"],
+      [17420, "that I have never heard"],
+      [18690, "I don't know what to say,"],
+      [21036, "oh, not another word"],
+      [22326, "Just la la la la la,"],
+      [24696, "it goes around the world"],
+      [26049, "Just la la la la la,"],
+      [28404, "it's all around the world"],
+      [29673, "Just la la la la la,"],
+      [32012, "and everybody's singing"],
+      [33520, "La la la la la,"],
+      [35631, "and now the bells are ringing"],
+      [37125, "La la la la la,"],
+      [39296, "la la la la la la la,"],
+      [40765, "la la la la la,"],
+      [42868, "la la la la la la la"],
+      [44444, "La la la la la,"],
+      [46483, "la la la la la la la,"],
+      [48049, "la la la la la,"],
+      [50102, "la la la la la la la"],
+      [66222, "Inside an empty room,"],
+      [68365, "my inspiration flows"],
+      [69703, "Now wait to hear the tune,"],
+      [71970, "around my head it goes"],
+      [73363, "The magic melody,"],
+      [75643, "you want to sing with me"],
+      [76953, "Just la la la la la,"],
+      [79244, "the music is the key"],
+      [80618, "And now the night is gone,"],
+      [82896, "still it goes on and on"],
+      [84569, "So deep inside of me,"],
+      [86569, "I long to set it free"],
+      [87798, "I don't know what to do,"],
+      [90148, "just can't explain to you"],
+      [91520, "I don't know what to say,"],
+      [93719, "oh, not another word"],
+      [95102, "Just la la la la la,"],
+      [97370, "it goes around the world"],
+      [98686, "Just la la la la la,"],
+      [100998, "it's all around the world"],
+      [102346, "Just la la la la la,"],
+      [104654, "and everybody's singing"],
+      [106265, "La la la la la,"],
+      [108335, "and now the bells are ringing"],
+      [109934, "La la la la la,"],
+      [111990, "la la la la la la la,"],
+      [113570, "la la la la la,"],
+      [115638, "la la la la la la la"],
+      [117158, "La la la la la,"],
+      [119243, "la la la la la la la,"],
+      [120760, "la la la la la,"],
+      [122783, "la la la la la la la"],
+      [140666, "The kisses of the sun"],
+      [141800, "kisses of the sun,"],
+      [143170, "of the sun, of the sun"],
+      [146269, "Around, around, around,"],
+      [148656, "around, around, around,"],
+      [151500, "around the world"],
+      [155651, "La la la la la,"],
+      [157368, "it goes around the world"],
+      [158756, "Just la la la la la,"],
+      [160996, "it's all around the world"],
+      [162378, "Just la la la la la,"],
+      [164677, "and everybody's singing"],
+      [166255, "La la la la la,"],
+      [168325, "and now the bells are ringing"],
+      [169839, "La la la la la,"],
+      [171969, "la la la la la la la,"],
+      [173548, "la la la la la,"],
+      [175599, "la la la la la la la"],
+      [176854, "La la la la la,"],
+      [179229, "la la la la la la la,"],
+      [180845, "la la la la la,"],
+      [182973, "la la la la la la la"],
+      [184457, "La la la la la,"],
+      [186209, "la la la la la la la"],
+      [188100, "La la la la la,"],
+      [190191, "la la la la la la la,"],
+      [191725, "La la la la la,"],
+      [193897, "la la la la la la la"],
+      [195401, "La la la la la,"],
+      [197444, "la la la la la la la"],
+    ],
+  },
+  {
+    name: "Edward Sharpe - Home",
+    url: "https://www.youtube.com/watch?v=DHEOF_rcND8",
+    lyrics: [
+      [18904, "Alabama, Arkansas"],
+      [21420, "I do love my ma and pa"],
+      [23135, "Not that way that"],
+      [24222, "I do love you"],
+      [27329, "Well, holy moly, me oh my"],
+      [29568, "You're the apple of my eye"],
+      [31750, "Girl, I've never"],
+      [32802, "loved one like you"],
+      [35957, "Man, oh man,"],
+      [36756, "you're my best friend"],
+      [38000, "I scream it to"],
+      [38852, "the nothingness"],
+      [40696, "There aint nothing that I need"],
+      [44250, "Well, hot and heavy,"],
+      [45575, "pumpkin pie"],
+      [46620, "Chocolate candy,"],
+      [47712, "Jesus Christ"],
+      [48843, "Ain't nothing please"],
+      [50100, "me more than you"],
+      [52800, "Oh, home, let me come home"],
+      [57269, "Home is wherever I'm with you"],
+      [61250, "Oh, home, let me come home"],
+      [65835, "Home is wherever I'm with you"],
+      [84969, "La, la, la, la, take me home"],
+      [90069, "(Daddy) Mother, Im coming home"],
+      [114200, "I'll follow you into the park"],
+      [116453, "Through the jungle,"],
+      [117525, "through the dark"],
+      [118687, "Girl, I never"],
+      [119678, "loved one like you (hey)"],
+      [122943, "Moats and boats and waterfalls"],
+      [125210, "Alleyways and pay phone calls"],
+      [127420, "I've been everywhere"],
+      [129200, "(hey) with you"],
+      [130569, "That's true,"],
+      [131696, "laugh until we think we'll die"],
+      [133869, "Barefoot on a summer night"],
+      [135918, "Never could be sweeter"],
+      [137469, "than with you (hey)"],
+      [140200, "And in the streets"],
+      [141174, "you run a-free"],
+      [142452, "Like it's only you and me"],
+      [144654, "Geez, you're something to see"],
+      [148395, "Oh, home, let me come home"],
+      [153334, "Home is wherever I'm with you"],
+      [157269, "Oh, home, let me come home"],
+      [161840, "Home is wherever I'm with you"],
+      [181000, "La, la, la, la, take me home"],
+      [186532, "(Daddy) Mother, Im coming home"],
+      [193933, "Jade"],
+      [194859, "Alexander"],
+      [196300, "Do you remember that day"],
+      [197379, "you fell out of my window?"],
+      [198899, "I sure do, you came"],
+      [199956, "jumping out after me"],
+      [202000, "Well, you fell on the concrete"],
+      [204123, "nearly broke your ass"],
+      [205117, "And you were bleedin'"],
+      [206015, "all over the place"],
+      [206983, "And I rushed you out to the"],
+      [208067, "hospital, you remember that?"],
+      [209311, "Yes, I do"],
+      [210300, "Well, theres something I never"],
+      [211270, "told you about that night"],
+      [212757, "What didn't you tell me?"],
+      [214222, "While you were sitting in the"],
+      [215200, "backseat smoking a cigarette"],
+      [217038, "You thought was gonna"],
+      [217847, "be your last"],
+      [219500, "I was falling deep,"],
+      [221192, "deeply in love with you"],
+      [223400, "And I never told you"],
+      [224800, "'til just now"],
+      [225901, "Aww"],
+      [227545, "Oh, home, let me come home"],
+      [231988, "Home is wherever I'm with you"],
+      [235866, "Oh, home, let me come home"],
+      [240696, "Home is where I'm"],
+      [242000, "alone with you"],
+      [244780, "Home, let me come home"],
+      [249397, "Home is wherever I'm with you"],
+      [253686, "Oh, home, yes, I am home"],
+      [258716, "Home is when I'm"],
+      [260275, "alone with you"],
+      [263289, "Alabama, Arkansas"],
+      [267569, "I do love my ma and pa"],
+      [271618, "Moats and boats and waterfalls"],
+      [275960, "Alleyways and pay phone calls"],
+      [284569, "Home is when"],
+      [285600, "I'm alone with you"],
+      [293000, "Home is when"],
+      [294081, "I'm alone with you"],
+    ],
+  },
+  {
+    name: "NCS - MATAFAKA",
+    url: "https://ncs.io/track/download/73f99b09-2aab-4e7f-b3d2-384093a92d7f",
+    lyrics: [
+      [27769, "Matafaka, matafaka"],
+      [48000, "Matafaka, matafaka"],
+      [90696, "Uh, thank God that"],
+      [91960, "the brother's on the rise now"],
+      [93777, "Endless celebrations"],
+      [94772, "all at my house"],
+      [96300, "Levitatin' now I'm"],
+      [96935, "super duper fly now"],
+      [98696, "Lemon boy but they"],
+      [99560, "see why I reside now"],
+      [100900, "Put the time in while you"],
+      [102064, "always yellin' time out"],
+      [103700, "Fa critic 'cause I"],
+      [104218, "know I'm comin' wit it"],
+      [105761, "You were sittin"],
+      [106387, "you were wishin,"],
+      [106939, "I was handlin' my business"],
+      [108300, "Now I got the ball like"],
+      [109300, "Harry Potter playin' Quidditch"],
+      [110625, "And my nuts are so humongous"],
+      [111722, "you would think that"],
+      [112514, "Hagrid's in it"],
+      [113200, "Ah man, I'm all bad,"],
+      [114721, "yeah I'm all bad"],
+      [115888, "Workin' for that whip, yeah"],
+      [116989, "that what you call that"],
+      [118202, "I'ma blow up in the summer"],
+      [119437, "have 'em yellin', \"Fall back\""],
+      [120643, "And I've always been ahead"],
+      [121978, "like an effin ball cap"],
+      [123304, "Man, I came in the"],
+      [124329, 'game like, "Woah"'],
+      [125331, "Gotta couple chains on"],
+      [126412, "me 'cause I like gold"],
+      [127747, "They told me I'm the best,"],
+      [128733, 'and I told \'em, "I know"'],
+      [130350, "'Cause when I'm in your"],
+      [131188, "town every ticket I sold"],
+      [133589, "Yeah, they sayin' I'm"],
+      [134808, "the man, facts bro"],
+      [136591, "A lot of haters, tell"],
+      [137706, "me where they at though"],
+      [138864, "I'm the new pop all"],
+      [140018, "I do is rap dough"],
+      [141365, '"Want me on your song?"'],
+      [142492, "Throw a couple stacks yo"],
+      [144500, "Everybody wanna"],
+      [145336, "do the same thing"],
+      [146754, "That's why we ain't"],
+      [148081, "on the same page"],
+      [149348, "Do my own thing,"],
+      [150200, "and I maintain"],
+      [151764, "Flow like water so"],
+      [152842, "I'm goin' mainstream"],
+      [155308, "I'm goin' mainstream"],
+      [156888, "Flow like water so"],
+      [157848, "I'm goin' mainstream"],
+      [160095, "Yeah, I'm goin' mainstream"],
+      [161840, "Flow like water so"],
+      [163000, "I'm goin' mainstream"],
+      [165600, "I'm going mainstream"],
+      [168300, "Mainstream"],
+      [172000, "Flow like water so"],
+      [173064, "I'm goin' mainstream"],
+      [177000, "Yup"],
+      [183615, "I'm goin' mainstream"],
+      [186930, "Damn"],
+      [192115, "Flow like water so"],
+      [193132, "I'm goin' mainstream"],
+      [196813, "Wooh"],
+      [203444, "I'm goin' mainstream"],
+      [212400, "Flow like water so"],
+      [213421, "I'm goin' mainstream"],
+      [215000, "They sayin' I'm"],
+      [215696, "the man, facts bro"],
+      [217369, "A lot of haters, tell"],
+      [218700, "me where they at though"],
+      [220000, "I'm the new pop all"],
+      [221080, "I do is rap dough"],
+      [222233, '"Want me on your song?"'],
+      [223270, "Throw a couple stacks yo"],
+      [225138, "Everybody wanna"],
+      [226185, "do the same thing"],
+      [227662, "That's why we ain't"],
+      [228949, "on the same page"],
+      [230224, "Do my own thing,"],
+      [231500, "and I maintain"],
+      [232585, "Flow like water so"],
+      [233700, "I'm goin' mainstream"],
+      [236488, "I'm goin' mainstream"],
+      [237842, "Flow like water so"],
+      [238658, "I'm goin' mainstream"],
+      [240700, "Yeah, I'm goin' mainstream"],
+      [242696, "Flow like water so"],
+      [243800, "I'm goin' mainstream"],
+      [246489, "I'm goin' mainstream"],
+      [249308, "Mainstream"],
+      [252903, "Flow like water so"],
+      [253917, "I'm goin' mainstream"],
+    ],
+  },
+  {
+    name: "Yungatina - 7 Weeks 3 Days",
+    lyrics: [
+      [15469, "When we met, I just knew"],
+      [18004, "That I already loved you,"],
+      [19907, "true, true"],
+      [22551, "I didn't even get it why"],
+      [26231, "Why you gotta stare"],
+      [27544, "with those eyes?"],
+      [30013, "I'm right across"],
+      [30735, "the dance floor"],
+      [32735, "Like it was just last night"],
+      [37240, "I didn't even get it why"],
+      [41076, "Why you gotta say goodbye?"],
+      [44700, "I should have called"],
+      [45400, "him by his last name"],
+      [47333, "It's been seven weeks"],
+      [48800, "and three days"],
+      [52110, "I should have called"],
+      [52836, "him by his last name"],
+      [55555, "It's been seven weeks"],
+      [56950, "and three days"],
+      [59519, "I should have called"],
+      [60300, "him by his last name"],
+      [62100, "It's been seven weeks"],
+      [63700, "and three days"],
+      [66830, "I should have called"],
+      [67542, "him by his last name"],
+      [70615, "It's been seven weeks"],
+      [71693, "and three days"],
+      [74500, "Boy, I let you in"],
+      [76969, "You didn't even have to knock"],
+      [81629, "An extra key on the first day"],
+      [85519, "I know the sheets"],
+      [86166, "by the first date"],
+      [89000, "We really made somethin'"],
+      [91869, "A miracle that most won't see"],
+      [96345, "But it meant a lot to me"],
+      [100109, "I don't get why you"],
+      [101018, "had to leave"],
+      [103768, "I should have called"],
+      [104521, "him by his last name"],
+      [106400, "It's been seven weeks"],
+      [107973, "and three days"],
+      [111125, "I should have called"],
+      [111856, "him by his last name"],
+      [114923, "It's been seven weeks"],
+      [116039, "and three days"],
+      [118539, "I should have called"],
+      [119300, "him by his last name"],
+      [121400, "It's been seven weeks"],
+      [122790, "and three days"],
+      [125950, "I should have called"],
+      [126769, "him by his last name"],
+      [129588, "It's been seven weeks"],
+      [130772, "and three days"],
+      [133396, "All my friends say, fuck you!"],
+      [136060, "But I can't even help"],
+      [137459, "but love you"],
+      [140736, "And even though you"],
+      [141636, "run me out dry"],
+      [144400, "I still think you're"],
+      [145200, "a decent guy, why?"],
+      [162979, "I should have called"],
+      [163662, "him by his last name"],
+      [165500, "It's been seven weeks"],
+      [166881, "and three days"],
+      [170180, "I should have called"],
+      [170973, "him by his last name"],
+      [173911, "It's been seven weeks"],
+      [175137, "and three days"],
+      [177631, "I should have called"],
+      [178249, "him by his last name"],
+      [181276, "It's been seven weeks"],
+      [182558, "and three days"],
+      [184969, "I should have called"],
+      [185700, "him by his last name"],
+      [187900, "It's been seven weeks"],
+      [189150, "and three days, days"],
+    ],
+  },
+  {
+    name: "ABBA - Gimme Gimme Gimme",
+    lyrics: [
+      [36154, "Half past twelve"],
+      [38000, "And I'm watchin' the late show"],
+      [39927, "in my flat, all alone"],
+      [41861, "How I hate to spend"],
+      [42969, "the evening on my own"],
+      [46500, "Autumn winds"],
+      [47863, "Blowin' outside the window"],
+      [49851, "as I look around the room"],
+      [51900, "And it makes me so depressed"],
+      [53607, "to see the gloom"],
+      [57000, "There's not a soul out there"],
+      [60844, "No one to hear my prayer"],
+      [68506, "Gimme, gimme, gimme"],
+      [69925, "a man after midnight"],
+      [72489, "Won't somebody help me"],
+      [74042, "chase these shadows away?"],
+      [76630, "Gimme, gimme, gimme"],
+      [78054, "a man after midnight"],
+      [80310, "Take me through the darkness"],
+      [81940, "to the break of the day"],
+      [104666, "Movie stars"],
+      [106200, "Find the end of the rainbow"],
+      [108198, "with a fortune to win"],
+      [109961, "It's so different from"],
+      [111291, "the world I'm living in"],
+      [114765, "Tired of TV"],
+      [116600, "I open the window"],
+      [118221, "and I gaze into the night"],
+      [120176, "But there's nothing"],
+      [121208, "there to see, no one in sight"],
+      [125400, "There's not a soul out there"],
+      [129180, "No one to hear my prayer"],
+      [136897, "Gimme, gimme, gimme"],
+      [138365, "a man after midnight"],
+      [140688, "Won't somebody help me"],
+      [142380, "chase these shadows away?"],
+      [144997, "Gimme, gimme, gimme"],
+      [146500, "a man after midnight"],
+      [148517, "Take me through the darkness"],
+      [150330, "to the break of the day"],
+      [153273, "Gimme, gimme, gimme"],
+      [154461, "a man after midnight"],
+      [161278, "Gimme, gimme, gimme"],
+      [162487, "a man after midnight"],
+      [220555, "There's not a soul out there"],
+      [224478, "No one to hear my prayer"],
+      [232240, "Gimme, gimme, gimme"],
+      [233628, "a man after midnight"],
+      [236180, "Won't somebody help me"],
+      [237630, "chase these shadows away?"],
+      [240256, "Gimme, gimme, gimme"],
+      [241650, "a man after midnight"],
+      [243998, "Take me through the darkness"],
+      [245584, "to the break of the day"],
+      [248150, "Gimme, gimme, gimme"],
+      [249645, "a man after midnight"],
+      [251905, "Won't somebody help me"],
+      [253531, "chase these shadows away?"],
+      [256205, "Gimme, gimme, gimme"],
+      [257617, "a man after midnight"],
+      [259823, "Take me through the darkness"],
+      [261543, "to the break of the day"],
+    ],
+  },
+  {
+    name: "One Direction - What Makes You Beautiful",
+    lyrics: [
+      [6755, "You're insecure,"],
+      [8671, "don't know what for"],
+      [10589, "You're turnin' heads"],
+      [11748, "when you walk through the door"],
+      [14387, "Don't need makeup"],
+      [16391, "to cover up (Huh)"],
+      [18249, "Bein' the way"],
+      [19524, "that you are is enough"],
+      [22869, "Everyone else in the"],
+      [24627, "room can see it"],
+      [26577, "Everyone else but you"],
+      [29762, "Baby, you light up my world"],
+      [31726, "like nobody else"],
+      [33550, "The way that you flip your"],
+      [35237, "hair gets me overwhelmed"],
+      [37467, "But when you smile at the"],
+      [39032, "ground, it ain't hard to tell"],
+      [41259, "You don't know, oh-oh,"],
+      [43862, "you dont know you're beautiful"],
+      [45827, "If only you saw what I can see"],
+      [48987, "You'll understand why"],
+      [50300, "I want you so desperately"],
+      [52731, "Right now I'm looking"],
+      [54185, "at you and I can't believe"],
+      [56701, "You don't know, oh-oh,"],
+      [59238, "you dont know you're beautiful"],
+      [61866, "oh-oh"],
+      [63040, "Thats what makes you beautiful"],
+      [68069, "So c-come on, you got it wrong"],
+      [72002, "To prove I'm right,"],
+      [73153, "I put it in a song"],
+      [75794, "I don't know why"],
+      [77767, "you're being shy"],
+      [79744, "And turn away when"],
+      [81014, "I look into your eyes"],
+      [84196, "Everyone else in the"],
+      [86069, "room can see it"],
+      [88046, "Everyone else but you"],
+      [91195, "Baby, you light up my"],
+      [92809, "world like nobody else"],
+      [95065, "The way that you flip your"],
+      [96730, "hair gets me overwhelmed"],
+      [98762, "But when you smile at the"],
+      [100486, "ground, it ain't hard to tell"],
+      [102677, "You don't know, oh-oh,"],
+      [105315, "you dont know you're beautiful"],
+      [107248, "If only you saw what I can see"],
+      [110359, "You'll understand why"],
+      [111673, "I want you so desperately"],
+      [114054, "Right now I'm looking"],
+      [115584, "at you and I can't believe"],
+      [118040, "You don't know, oh-oh,"],
+      [120610, "you dont know you're beautiful"],
+      [123285, "oh-oh"],
+      [124440, "Thats what makes you beautiful"],
+      [127023, "Na, na-na-na, na-na-na, na, na"],
+      [130275, "Na, na-na-na, na-na"],
+      [134269, "Na, na-na-na, na-na-na, na, na"],
+      [137947, "Na, na-na-na, na-na"],
+      [141065, "Baby, you light up my world"],
+      [143125, "like nobody else"],
+      [144946, "The way that you flip your"],
+      [146769, "hair gets me overwhelmed"],
+      [148797, "But when you smile at the"],
+      [150449, "ground, it ain't hard to tell"],
+      [152684, "(You don't know, oh-oh)"],
+      [155257, "You dont know you're beautiful"],
+      [156666, "Baby, you light up my world"],
+      [158415, "like nobody else"],
+      [160242, "The way that you flip your"],
+      [162099, "hair Cmon gets me overwhelmed"],
+      [164116, "But when you smile at the"],
+      [165735, "ground, it ain't hard to tell"],
+      [167975, "You don't know, oh-oh,"],
+      [170595, "you dont know you're beautiful"],
+      [172614, "If only you saw what I can see"],
+      [175609, "You'll understand why"],
+      [177025, "I want you so desperately"],
+      [179459, "Right now I'm looking"],
+      [180956, "at you and I can't believe"],
+      [183277, "You don't know oh-oh,"],
+      [185983, "you dont know you're beautiful"],
+      [188557, "oh-oh"],
+      [189807, "You dont know you're beautiful"],
+      [192498, "oh-oh"],
+      [193665, "Thats what makes you beautiful"],
+    ],
+  },
+  {
+    name: "The Coconut Song",
+    url: "https://www.youtube.com/watch?v=PKQPey6L42M",
+    lyrics: [
+      [300, "La la la, la la la la,"],
+      [2238, "la la la la la la"],
+      [3847, "La la la, la la la la,"],
+      [5872, "la la la la la la"],
+      [7549, "La la la, la la la la,"],
+      [9376, "la la la la la la"],
+      [11039, "La la la, la la la la,"],
+      [13054, "la la la la la la"],
+      [14624, "KO KO NUT"],
+      [16210, "KO KO KO KO NUT"],
+      [17620, "(kokonut)"],
+      [18469, "KO KO NUT"],
+      [19697, "KO KO KO KO KO NUT"],
+      [20974, "(kokonut)"],
+      [21913, "KO KO NUT"],
+      [23181, "KO KO KO KO KO NUT"],
+      [24576, "(kokonut)"],
+      [25476, "KO KO NUT"],
+      [26701, "KO KO KO KO KO NUT"],
+      [28647, "The kokonut nut"],
+      [30081, "Is a giant nut"],
+      [31813, "If you eat too much..."],
+      [33417, "You'll get VERY fat!!!"],
+      [35291, "Now"],
+      [35958, "The kokonut nut"],
+      [37331, "Is a big big nut"],
+      [38895, "But this delicious nut..."],
+      [40908, "Is NOT a nut!!!"],
+      [42719, "It's a koko fruit"],
+      [44502, "(It's a koko fruit)"],
+      [46268, "Of the koko tree"],
+      [47969, "(Of the koko tree)"],
+      [49835, "From the koko palm family"],
+      [52607, "La la la la la"],
+      [53940, "There are so many uses"],
+      [55274, "Of the kokonut tree"],
+      [57242, "You can build a bigger"],
+      [58512, "House for the family"],
+      [60656, "All you need is to"],
+      [62333, "Find the kokonut man"],
+      [64737, "If he cuts the tree..."],
+      [66302, "I get the fruits free!!!"],
+      [68421, "It's a koko fruit"],
+      [69966, "(It's a koko fruit)"],
+      [71725, "Of the koko tree"],
+      [73555, "(Of the koko tree)"],
+      [75320, "From the koko palm family"],
+      [78193, "La la la la la"],
+      [79695, "KO KO NUT"],
+      [81110, "KO KO KO KO KO NUT"],
+      [82697, "(kokonut)"],
+      [83559, "KO KO NUT"],
+      [84605, "KO KO KO KO KO NUT"],
+      [86567, "The kokonut bark for"],
+      [88286, "the kitchen floor"],
+      [89676, "If you save some of it..."],
+      [91561, "You can build a door"],
+      [93401, "Now"],
+      [94110, "The kokonut trunk"],
+      [95293, "Do not throw this junk"],
+      [97138, "If you save some of it..."],
+      [98638, "You'll have a second floor!!!"],
+      [101111, "The kokonut wood"],
+      [102480, "Is very good"],
+      [104428, "It can stand 20 years..."],
+      [106121, "If you pray it wood!!! :D"],
+      [107809, "Now"],
+      [108400, "The kokonut root"],
+      [109821, "To tell you the truth"],
+      [111387, "You can throw it..."],
+      [112719, "Or use it as firewood!!!"],
+      [115338, "The kokonut leaves"],
+      [117128, "Good shade it gives"],
+      [119053, "For the roof..."],
+      [119975, "For the walls up"],
+      [120928, "against the theives!!!"],
+      [122441, "Now"],
+      [123073, "The kokonut fruit"],
+      [124486, "Says my relatives"],
+      [126029, "Makes good cannon balls..."],
+      [128202, "Up against the thieves!!!"],
+      [129928, "It's a kokofruit"],
+      [131557, "(It's a koko fruit)"],
+      [133410, "Of the koko tree"],
+      [135216, "(Of the koko tree)"],
+      [137017, "From the koko palm family"],
+      [139702, "La la la la la"],
+      [141221, "The kokonut nut"],
+      [142560, "Is a giant nut"],
+      [144156, "If you eat too much..."],
+      [145809, "You'll get very fat!!!"],
+      [147732, "Now"],
+      [148402, "The kokonut nut"],
+      [149549, "Is a big big nut"],
+      [151303, "But this delicious nut..."],
+      [153317, "Is not a nut!!!"],
+      [154817, "The kokonut nut"],
+      [156762, "Is a giant nut"],
+      [158314, "If you eat too much..."],
+      [160037, "You'll get very fat!!!"],
+      [161888, "Now"],
+      [162400, "The kokonut nut"],
+      [163918, "Is a big big nut"],
+      [165493, "But this delicious nut..."],
+      [167340, "Is not a nut!!!"],
+      [168950, "It's a koko fruit"],
+      [170888, "(It's a koko fruit)"],
+      [172653, "Of the koko tree"],
+      [174400, "(Of the koko tree)"],
+      [176200, "From the koko palm family"],
+      [178924, "La la la la la"],
+      [180196, "It's a koko fruit"],
+      [181669, "(It's a koko fruit)"],
+      [183408, "Of the koko tree"],
+      [185268, "(Of the koko tree)"],
+      [186990, "From the koko palm family"],
+      [189803, "La la la la la la"],
+      [191000, "It's a koko fruit"],
+      [192319, "(It's a koko fruit)"],
+      [194359, "Of the koko tree"],
+      [196295, "(Of the koko tree)"],
+      [197913, "From the cocopalm familyyyyyyy"],
+      [202400, "La la la la la la la la la"],
+      [205269, "la la la la la la"],
+      [206900, "la la la la la"],
+      [208630, "Hooray"],
+    ],
+  },
+  {
+    name: "The Neighbourhood - Sweater Weather",
+    lyrics: [
+      [20957, "And all I am is a man"],
+      [24559, "I want the world in my hands"],
+      [28200, "I hate the beach"],
+      [30535, "But I stand in California"],
+      [33901, "with my toes in the sand"],
+      [36100, "Use the sleeves of my sweater"],
+      [38119, "Let's have an adventure"],
+      [40288, "Head in the clouds"],
+      [41600, "but my gravity centered"],
+      [44140, "Touch my neck"],
+      [45844, "and I'll touch yours"],
+      [47931, "You in those little"],
+      [49358, "high waisted shorts, oh"],
+      [52969, "She knows what I think about"],
+      [55400, "And what I think about"],
+      [56800, "One love, two mouths"],
+      [58913, "One love, one house"],
+      [60607, "No shirt, no blouse"],
+      [62627, "Just us, you find out"],
+      [64384, "Nothing that I wouldn't wanna"],
+      [65400, "tell you about, no"],
+      [67000, "'Cause it's too cold"],
+      [71187, "For you here"],
+      [73917, "And now, so let me hold"],
+      [78878, "Both your hands in"],
+      [81500, "the holes of my sweater"],
+      [83666, "And if I may just take"],
+      [84600, "your breath away"],
+      [85633, "I don't mind if there's"],
+      [86521, "not much to say"],
+      [87546, "Sometimes the silence"],
+      [88333, "guides a mind"],
+      [89468, "To move to a place so far away"],
+      [91969, "The goosebumps start to raise"],
+      [93402, "The minute that my left hand"],
+      [94222, "meets your waist"],
+      [95900, "And then I watch your face"],
+      [97300, "Put my finger on your tongue"],
+      [98100, "'cause you love to taste, yeah"],
+      [100053, "These hearts adore, everyone"],
+      [101600, "the other beats hardest for"],
+      [103200, "Inside this place is warm"],
+      [105200, "Outside it starts to pour"],
+      [107945, "Coming down"],
+      [109001, "One love, two mouths"],
+      [111128, "One love, one house"],
+      [112974, "No shirt, no blouse"],
+      [114827, "Just us, you find out"],
+      [116573, "Nothing that I wouldn't wanna"],
+      [117363, "tell you about, no, no, no"],
+      [121456, "'Cause it's too cold"],
+      [125367, "For you here"],
+      [128136, "And now, so let me hold"],
+      [133068, "Both your hands in"],
+      [135730, "the holes of my sweater"],
+      [137000, "'Cause it's too cold"],
+      [141000, "For you here"],
+      [143643, "And now, so let me hold"],
+      [148544, "Both your hands in"],
+      [151275, "the holes of my sweater"],
+      [153503, "Whoa, whoa, whoa"],
+      [166200, "Whoa, whoa, whoa"],
+      [173900, "Whoa, whoa, whoa"],
+      [181651, "Whoa, whoa, whoa"],
+      [189360, "Whoa, whoa, whoa"],
+      [197069, "Whoa, whoa, whoa"],
+      [202500, "'Cause it's too cold"],
+      [206658, "For you here"],
+      [209372, "And now, so let me hold"],
+      [214380, "Both your hands in"],
+      [217034, "the holes of my sweater"],
+      [218300, "It's too cold"],
+      [222133, "For you here"],
+      [224871, "And now, let me hold"],
+      [229934, "Both your hands in"],
+      [232466, "the holes of my sweater"],
+      [235598, "And it's too cold,"],
+      [237606, "it's too cold"],
+      [240600, "The holes of my sweater"],
+    ],
+  },
+  {
+    name: "Tung Tung Tung Sahur - Ratatung",
+    url: "https://www.youtube.com/watch?v=TZAdoZy6y34",
+    lyrics: [
+      [1, "Tung"],
+      [748, "Ratata ta tung"],
+      [2525, "Ratata ta tung"],
+      [4461, "Ratata ta tung tung tung SAHUR"],
+      [8293, "Ratata ta tung (hey)"],
+      [10300, "Ratata ta tung (hey)"],
+      [12090, "Ratata ta tung tung tung SAHUR"],
+      [15995, "Ratata ta tung (hey)"],
+      [17897, "Ratata ta tung (hey)"],
+      [19800, "Ratata ta tung tung tung SAHUR"],
+      [23200, "Crank it up,"],
+      [23867, "here's my master plan,"],
+      [25200, "Steal the crown like"],
+      [25969, "a wanted man,"],
+      [26993, "Pa pa pa pa da pa"],
+      [29200, "Tralelero Tralala"],
+      [30933, "Every hit is a battle won,"],
+      [32841, "Drop that sound like"],
+      [33700, "a smoking gun,"],
+      [34939, "Pa pa pa pa da pa"],
+      [36602, "Tralelero Tralala"],
+      [39269, "Can you feel it now,"],
+      [40947, "Rising through the crowd,"],
+      [42826, "I'm the one they play"],
+      [44444, "when the world gets loud!"],
+      [46369, "Hey!"],
+      [47000, "Ratata ta tung (hey)"],
+      [48610, "Ratata ta tung (hey)"],
+      [50422, "Ratata ta tung tung tung SAHUR"],
+      [54406, "Ratata ta tung (hey)"],
+      [56330, "Ratata ta tung (hey)"],
+      [58206, "Ratata ta tung tung tung SAHUR"],
+      [61600, "No..."],
+      [62400, "I don't like boring verses..."],
+      [64600, "So follow me!"],
+      [66969, "Tralalero Tralala"],
+      [69328, "Pa pa pa pa pa da pa pa"],
+      [71238, "Tralalero Tralala"],
+      [73088, "Pa pa pa pa pa da pa pa"],
+      [75000, "Tralalero Tralala"],
+      [76500, "Hey!"],
+      [77666, "Can you feel it now,"],
+      [79400, "Rising through the crowd,"],
+      [81300, "I'm the one they play"],
+      [82732, "when the world gets loud!"],
+      [84817, "Hey!"],
+      [85565, "Ratata ta tung (hey)"],
+      [87013, "Ratata ta tung (hey)"],
+      [89019, "Ratata ta tung tung tung SAHUR"],
+      [92700, "Ratata ta tung (hey)"],
+      [94640, "Ratata ta tung (hey)"],
+      [96590, "Ratata ta tung tung tung SAHUR"],
+      [100398, "Ratata ta tung (hey)"],
+      [102367, "Ratata ta tung (hey)"],
+      [104353, "Ratata ta tung tung tung SAHUR"],
+      [108210, "Ratata ta tung (hey)"],
+      [110035, "Ratata ta tung (hey)"],
+      [112012, "Ratata ta tung tung tung SAHUR"],
+    ],
+  },
+  {
+    name: "Quadeca - Candles On Fire",
+    lyrics: [
+      [24800, "Woke up feeling mad today"],
+      [26300, "Bitch, im ugly, but"],
+      [26900, "I act like Timmy Chalamet, uh"],
+      [28666, "I hate these motherfuckers"],
+      [29400, "so, so much"],
+      [30221, "Why I keep on tryna get em"],
+      [31100, "all to validate me?"],
+      [32600, "Its no help, im living like,"],
+      [33500, "Oh well"],
+      [34359, "Like my English teacher said,"],
+      [35083, "had to show em, I dont tell"],
+      [36170, "I show em I dont fail,"],
+      [37100, "they knowin me so well"],
+      [38114, "I been catchin all the shade"],
+      [39007, "they've been throwin im, Odell"],
+      [41000, "Turn the cameras on"],
+      [42311, "Quick water break"],
+      [43005, "in the marathon"],
+      [44242, "Walk in your room"],
+      [45000, "and I set the mood"],
+      [45883, "They aint gotta light the"],
+      [46569, "Motherfuckin candles on fire"],
+      [48500, "Cant see without da cameras on"],
+      [50049, "Without a platform"],
+      [50800, "to be standin on, uh"],
+      [52369, "All this baggage"],
+      [52971, "going over they heads"],
+      [53817, "So I keep it underneath"],
+      [54725, "how I carry on, ooh"],
+      [56647, "Im goin crazy"],
+      [58024, "Too hot for Milan,"],
+      [58852, "had to add the AC (Woo)"],
+      [60035, "Guess whats gettin"],
+      [60696, "to em lately?"],
+      [61916, "They been takin shots at a boy"],
+      [63100, "I just say Cheese!"],
+      [64154, "I smell the green,"],
+      [64669, "thats synesthesia"],
+      [65332, "Growin up, im already"],
+      [66100, "too old for Chris D'Elia"],
+      [67245, "They tryna run they mouth,"],
+      [68169, "checkin in on that big career"],
+      [69242, "and look, its nada"],
+      [70202, "Voila, it disappeared, ok, ayy"],
+      [72006, "These sparks are fickle"],
+      [72830, "and simple-minded"],
+      [73590, "Flashlight in the dark"],
+      [74501, "how people gon get behind em"],
+      [75500, "I never killed my ego,"],
+      [76447, "its trippin on psilocybin"],
+      [77453, "That Shit'll kill me inside if"],
+      [78367, "they hear it and never mind-it"],
+      [79546, "Ive been gassed up, thats why"],
+      [80750, "they dont hold a candle to me"],
+      [81958, "Masked up way before"],
+      [82747, "it was a standard duty"],
+      [83811, "Back up, I came in this Shit"],
+      [85295, "Put my sticks in the ground so"],
+      [86367, "I sorry but you cant remove me"],
+      [88241, "Turn the cameras on"],
+      [89447, "Quick water break"],
+      [90095, "in the marathon"],
+      [91402, "Walk in your room"],
+      [92122, "and I set the mood"],
+      [93200, "They aint gotta light the"],
+      [94000, "Motherfuckin candles on fire"],
+      [95634, "Cant see without da cameras on"],
+      [97305, "Without a platform"],
+      [98000, "to be standin on, uh"],
+      [99511, "All this baggage"],
+      [100207, "going over they heads"],
+      [100981, "So I keep it underneath"],
+      [101830, "how I carry on, ooh"],
+      [107300, "They put the red dot"],
+      [107958, "right back on his head"],
+      [109466, "In fact, it never left"],
+      [110527, "Fuck a gold plaque,"],
+      [111249, "I want platinum instead, uh"],
+      [113200, "It wont matter no less"],
+      [114573, "All my nights sleepless,"],
+      [115363, "but my dreams still vivid"],
+      [116629, "Hole getting deeper,"],
+      [117342, "but the team still winnin"],
+      [118586, "Let me look around,"],
+      [119163, "like will you please love me?"],
+      [120491, "End up in the ground,"],
+      [121124, "will they still think of me"],
+      [122411, "Where they stil feel something"],
+      [123396, "Aint nobody laughing,"],
+      [124186, "but it still feels funny to me"],
+      [125621, "Its all a game, all these"],
+      [126461, "people just a number to me"],
+      [127550, "And what could it be?"],
+      [128369, "No matter how I feel you could"],
+      [129422, "bet I give em somethin to see"],
+      [130681, "Whats the price of"],
+      [131292, "living comfortably?"],
+      [132098, "All these numbers mind numbing"],
+      [132822, "to me, its nothin to me"],
+      [134266, "Get my pants tailored"],
+      [135111, "with the big pockets"],
+      [136033, "I dont give em much room"],
+      [136966, "when they Shit talkin, ayy"],
+      [139300, "Turn the cameras on"],
+      [140666, "Quick water break"],
+      [141500, "in the marathon"],
+      [142615, "Walk in your room"],
+      [143306, "and I set the mood"],
+      [144334, "They aint gotta light the"],
+      [145121, "Motherfuckin candles on fire"],
+      [146819, "Cant see without da cameras on"],
+      [148460, "Without a platform"],
+      [149221, "to be standin on, uh"],
+      [150747, "All this baggage"],
+      [151395, "going over they heads"],
+      [152229, "So I keep it underneath"],
+      [153003, "how I carry on, ooh"],
+      [155313, "Turn the cameras on"],
+      [158388, "Walk in your room"],
+      [159059, "and I set the mood"],
+      [160060, "They aint gotta light the"],
+      [160644, "Motherfuckin candles on fire"],
+      [163265, "Cameras on"],
+      [164276, "Without a platform"],
+      [164968, "to be standing on"],
+      [166336, "All this baggage"],
+      [167039, "going over they heads"],
+      [167882, "So I keep it underneath"],
+      [168792, "how I carry on, ooh"],
+      [174644, "The route up the ice ridge"],
+      [175560, "was hard but safe"],
+      [177296, "Boyson could watch the"],
+      [178419, "avalanches go by and"],
+      [180230, "even enjoy the view"],
+    ],
+  },
+  {
+    name: "Justin Bieber - Stay",
+    lyrics: [
+      [30600, "I do the same"],
+      [31500, "thing I told you that"],
+      [32399, "I never would"],
+      [33325, "I told you I'd change,"],
+      [34347, "even when I knew I never could"],
+      [36018, "I know that I can't"],
+      [37133, "find nobody else as good as u"],
+      [38797, "I need you to stay,"],
+      [39822, "need you to stay, hey (oh)"],
+      [42100, "I get drunk,"],
+      [42869, "wake up,"],
+      [43755, "I'm wasted still"],
+      [44922, "I realize the time"],
+      [46235, "that I wasted here"],
+      [47700, "I feel like"],
+      [48511, "you can't feel the way I feel"],
+      [50479, "Oh, I'll be fucked up"],
+      [51699, "if you can't be right here"],
+      [53128, "Oh, ooh-woah"],
+      [54500, "(oh, ooh-woah, ooh-woah)"],
+      [55948, "Oh, ooh-woah"],
+      [57416, "(oh, ooh-woah, ooh-woah)"],
+      [58774, "Oh, ooh-woah"],
+      [59900, "(oh, ooh-woah, ooh-woah)"],
+      [61387, "Oh, I'll be fucked up"],
+      [62959, "if you can't be right here"],
+      [64384, "I do the same"],
+      [65500, "thing I told you that"],
+      [66141, "I never would"],
+      [67188, "I told you I'd change,"],
+      [68218, "even when I knew I never could"],
+      [69909, "I know that I can't"],
+      [70925, "find nobody else as good as u"],
+      [72730, "I need you to stay,"],
+      [73869, "need you to stay, hey"],
+      [75800, "I do the same"],
+      [76800, "thing I told you that"],
+      [77600, "I never would"],
+      [78467, "I told you I'd change,"],
+      [79539, "even when I knew I never could"],
+      [81217, "I know that I can't"],
+      [82353, "find nobody else as good as u"],
+      [84004, "I need you to stay,"],
+      [85260, "need you to stay, hey"],
+      [87106, "When I'm away from you,"],
+      [88438, "I miss your touch (ooh)"],
+      [90057, "You're the reason"],
+      [90762, "I believe in love"],
+      [92876, "It's been difficult"],
+      [93817, "for me to trust (ooh)"],
+      [95653, "And I'm afraid that"],
+      [96320, "I'ma fuck it up"],
+      [98560, "Ain't no way"],
+      [99133, "that I can leave you stranded"],
+      [101364, "'Cause you ain't ever"],
+      [102100, "left me empty-handed"],
+      [104129, "And you know that I know that"],
+      [105810, "I can't live without you"],
+      [107823, "So, baby, stay"],
+      [109657, "Oh, ooh-woah"],
+      [111013, "(oh, ooh-woah, ooh-woah)"],
+      [112382, "Oh, ooh-woah"],
+      [113799, "(oh, ooh-woah, ooh-woah)"],
+      [115300, "Oh, ooh-woah"],
+      [116585, "(oh, ooh-woah, ooh-woah)"],
+      [117900, "I'll be fucked up"],
+      [119500, "if you can't be right here"],
+      [120900, "I do the same"],
+      [121900, "thing I told you that"],
+      [122800, "I never would"],
+      [123535, "I told you I'd change,"],
+      [124625, "even when I knew I never could"],
+      [126351, "I know that I can't"],
+      [127624, "find nobody else as good as u"],
+      [129142, "I need you to stay,"],
+      [130318, "need you to stay, hey"],
+      [132319, "I do the same"],
+      [133150, "thing I told you that"],
+      [134000, "I never would"],
+      [134775, "I told you I'd change,"],
+      [135978, "even when I knew I never could"],
+      [137614, "I know that I can't"],
+      [138753, "find nobody else as good as u"],
+      [140407, "I need you to stay,"],
+      [141500, "need you to stay, hey"],
+      [148700, "Woah-oh"],
+      [151991, "I need you to stay,"],
+      [152856, "need you to stay, hey"],
+    ],
+  },
+  {
+    name: "The Rare Occasions - Notion (Sped Up)",
+    lyrics: [
+      [9932, "Sure, it's a calming notion,"],
+      [12416, "perpetual in motion"],
+      [15056, "But I don't need the comfort"],
+      [17680, "of any lies"],
+      [20399, "For I have seen the ending,"],
+      [22898, "and there is no ascending"],
+      [25952, "Ri"],
+      [26622, "Rii"],
+      [27168, "Riii"],
+      [27743, "Riii"],
+      [28371, "Riiiise"],
+      [30646, "Oh, back when I was younger,"],
+      [33277, "was told by other youngsters"],
+      [35861, "That my end will be torture"],
+      [38422, "beneath the earth"],
+      [41042, "'Cause I don't see what they see,"],
+      [43707, "when death is staring at me"],
+      [46361, "I see a window,"],
+      [47150, "a limit,"],
+      [47774, "to live it,"],
+      [48337, "or not at all"],
+      [75021, "If you could pull the lever"],
+      [77533, "to carry on forever"],
+      [80149, "Would your life even"],
+      [81883, "matter anymore?"],
+      [85414, "Sure, it's a calming notion,"],
+      [87982, "perpetual in motion"],
+      [90878, "But it's not"],
+      [91625, "what"],
+      [92168, "you"],
+      [92746, "signed"],
+      [93366, "up"],
+      [94665, "for"],
+      [107215, "I'm sure there won't"],
+      [108481, "always be sunshine"],
+      [112456, "But there's this momentary beam"],
+      [115801, "of light"],
+      [117407, "You don't have to wait"],
+      [118400, "those salty decades"],
+      [119935, "To get through the gate,"],
+      [121020, "it's all in front of your face"],
+      [122609, "I'm sure there won't"],
+      [124303, "always be sunshine"],
+      [128335, "I'm sure"],
+      [129280, "there won't always be sunshine"],
+      [133414, "But there's this momentary beam"],
+      [136886, "of light"],
+      [138210, "I could-could cross the ocean"],
+      [140617, "in a fit of devotion"],
+      [143351, "For every shining second,"],
+      [145923, "this fragile body beckons"],
+      [148660, "You think you're owed it better"],
+      [151008, "believing ancient letters"],
+      [153887, "Sure, it's a calming notion,"],
+      [156736, "but it's a lie"],
+      [157414, "but it's a liee"],
+      [157958, "but it's a lieee"],
+    ],
+  },
+  {
+    name: "Civilian - Close Call",
+    lyrics: [
+      [4969, "I just gotta let you know"],
+      [7100, "Ever since you called me"],
+      [9100, "Im tearing up my schedule"],
+      [11069, "Cause I've been thinking"],
+      [11844, "about you all week"],
+      [13516, "When I get you alone"],
+      [15100, "I don't feel loved like"],
+      [15915, "I say I do"],
+      [17801, "Cause he's calling your phone"],
+      [19460, "I'm dodging bullets"],
+      [20305, "the shape of you"],
+      [22322, "Close call"],
+      [23488, "I hope you never call me again"],
+      [26418, "And so far"],
+      [27789, "We're farther gone than"],
+      [29174, "where we began"],
+      [30800, "I'll let these memories fade"],
+      [32800, "But I don't wanna forget"],
+      [35303, "I'll never be your best"],
+      [37501, "I'm letting you go"],
+      [43700, "I should've known"],
+      [44238, "it would end up like this"],
+      [45600, "Late night body"],
+      [46421, "to somebody I'd miss"],
+      [47821, "Don't say you need"],
+      [48777, "time for yourself"],
+      [49956, "You mean somebody else"],
+      [51700, "I know these days"],
+      [54081, "I feel like I'm better alone"],
+      [56946, "Sweet escape to me babe"],
+      [59598, "I'm letting you go"],
+      [61226, "Ill let these memories fade"],
+      [63500, "So you can leave"],
+      [64362, "my mind in peace"],
+      [65774, "We made it one week"],
+      [66539, "Want a piece of my mind"],
+      [67764, "Baby do this on me"],
+      [68758, "cause darling"],
+      [70100, "When I get you alone"],
+      [71695, "I don't feel loved"],
+      [72509, "like I say I do"],
+      [74500, "Cause he's calling your phone"],
+      [76125, "I'm dodging bullets"],
+      [76920, "in the shape of you"],
+      [78934, "Close call"],
+      [80069, "I hope you never call me again"],
+      [83038, "And so far"],
+      [84443, "We're farther gone than"],
+      [85899, "where we began"],
+      [87469, "I'll let these memories fade"],
+      [89705, "But I don't wanna forget"],
+      [91984, "I'll never be your best"],
+      [94169, "I'm letting you go"],
+      [96356, "Slow down (slow down)"],
+      [97400, "let go (let go)"],
+      [98600, "I won't call back like an echo"],
+      [100437, "I could change my mind"],
+      [101425, "like presto (presto)"],
+      [102608, "But my heads held high"],
+      [103647, "and my stress low"],
+      [105000, "Alright let's go"],
+      [107300, "Imma sign off like XO"],
+      [109569, "You had a shot at this"],
+      [110800, "A close call I'm"],
+      [111300, "the one you'll miss"],
+      [112600, "So come on now"],
+      [122369, "Girl I really thought"],
+      [122900, "I met my match"],
+      [124122, "But without you and I"],
+      [125001, "stroke it off like that"],
+      [126128, "Baby now Im cutting a lit fuse"],
+      [128476, "I see you in hindsight"],
+      [129366, "it's all in my rearview"],
+      [130769, "Our better days bind us"],
+      [131769, "let it fade behind us"],
+      [132844, "Tore us apart quicker"],
+      [133852, "than get away drivers"],
+      [135200, "I've been running"],
+      [136000, "from the day I knew"],
+      [137195, "I'm dodging bullets"],
+      [138007, "the shape of you"],
+      [140005, "Close call"],
+      [141256, "I hope you never call me again"],
+      [144125, "And so far"],
+      [145504, "We're farther gone than"],
+      [147030, "where we began"],
+      [148433, "I'll let these memories fade"],
+      [150816, "But I don't wanna forget"],
+      [153060, "I'll never be your best"],
+      [155240, "I'm letting you go"],
+    ],
+  },
+  {
+    name: "Pharmacist - North Memphis",
+    lyrics: [
+      [11200, "Pharmacist motherfucker"],
+      [12500, "Project Pat don't give a fu-"],
+      [18400, "Project Pat don't give a fuck"],
+      [25485, "North Memphis nigga,"],
+      [26436, "North Memphis nigga"],
+      [27505, "North Memphis,"],
+      [28271, "North Memphis nigga"],
+      [29729, "Project Pat don't give a fuck"],
+      [31117, "North Memphis nigga,"],
+      [32182, "North Memphis nigga"],
+      [33275, "North Memphis-"],
+      [33984, "North Memphis nigga"],
+      [35500, "The definition of a player"],
+      [37392, "A nigga that play hoes"],
+      [38543, "to make the ends meet"],
+      [39696, "You gotta know the game,"],
+      [40700, "how it's played,"],
+      [41446, "it's all about thinkin' deep"],
+      [42521, "Sum' gonna cross you out,"],
+      [44000, "sum' gonna smoke you out"],
+      [45420, "But you can talk yo' ass"],
+      [46475, "off my Glock,"],
+      [47100, "I'm breakin' somethin' off"],
+      [48262, "Proper, I kick it at"],
+      [49514, "right up where the players at"],
+      [51116, "Bumpin', pimpin', smokin' sess"],
+      [52604, "with Dre and Ray-Ray"],
+      [53599, "in that mask"],
+      [54252, "We love to see these niggas"],
+      [55460, "sweat up on our bitch you see"],
+      [56901, "Drizzay hit them,"],
+      [57608, "baby, then we vampin'"],
+      [58579, "with them dead G's"],
+      [59969, "North Memphis niggas,"],
+      [60856, "North Memphis niggas"],
+      [61917, "North Memphis,"],
+      [62692, "North Memphis niggas"],
+      [64094, "Project Pat don't give a fuck"],
+      [65560, "North Memphis niggas,"],
+      [66595, "North Memphis niggas"],
+      [67687, "North Memphis,"],
+      [68412, "North Memphis niggas"],
+      [69838, "Project Pat don't give a fuck"],
+      [72700, "Pharmacist motherfucker"],
+    ],
+  },
+  {
+    name: "Maroon 5 - Payphone",
+    lyrics: [
+      [179, "I'm at a payphone,"],
+      [2091, "trying to call home"],
+      [4345, "All of my change,"],
+      [5709, "I spent on you"],
+      [8651, "Where have the times gone?"],
+      [10780, "Baby, it's all wrong"],
+      [13016, "Where are the plans"],
+      [14361, "we made for two?"],
+      [17905, "Yeah, I,"],
+      [18857, "I know it's hard to remember"],
+      [21112, "the people we used to be"],
+      [23271, "It's even harder to picture"],
+      [25527, "that youre not here next to me"],
+      [27705, "You say it's too late"],
+      [28656, "to make it,"],
+      [29949, "but is it too late to try?"],
+      [32095, "And in our time that u wasted,"],
+      [33719, "all of our bridges burned down"],
+      [36374, "I've wasted my nights,"],
+      [38617, "you turned out the lights"],
+      [40828, "Now I'm paralyzed"],
+      [42992, "Still stuck in that time"],
+      [45198, "when we called it love"],
+      [47360, "But even the sun"],
+      [49492, "sets in paradise"],
+      [52516, "I'm at a payphone,"],
+      [54431, "trying to call home"],
+      [56638, "All of my change,"],
+      [58048, "I spent on you"],
+      [61013, "Where have the times gone?"],
+      [63149, "Baby, it's all wrong"],
+      [65297, "Where are the plans"],
+      [66710, "we made for two?"],
+      [69731, "If happy-ever-afters did exist"],
+      [74013, "I would still be"],
+      [75175, "holding you like this"],
+      [78365, "All those fairy tales"],
+      [79794, "are full of shit"],
+      [82735, "One more fucking love song,"],
+      [84695, "I'll be sick,"],
+      [87219, "oh, yeah"],
+      [88809, "U turned your back on tomorrow"],
+      [90918, "'cause you forgot yesterday"],
+      [92930, "I gave you my love to borrow,"],
+      [95180, "but you just gave it away"],
+      [97559, "You can't expect me to be fine"],
+      [99757, "I don't expect you to care"],
+      [101831, "I know I said it before, but"],
+      [103585, "all of our bridges burned down"],
+      [106288, "I've wasted my nights,"],
+      [108424, "you turned out the lights"],
+      [110645, "Now I'm paralyzed (oh)"],
+      [112876, "Still stuck in that time"],
+      [115055, "when we called it love"],
+      [117183, "But even the sun"],
+      [119321, "sets in paradise"],
+      [122100, "I'm at a payphone,"],
+      [124275, "trying to call home"],
+      [126435, "All of my change,"],
+      [127888, "I spent on you"],
+      [130200, "(oh-oh)"],
+      [131000, "Where have the times gone?"],
+      [132988, "Baby, it's all wrong"],
+      [135184, "Where are the plans"],
+      [136400, "we made for two?"],
+      [138900, "(Yeah)"],
+      [139590, "If happy-ever-afters did exist"],
+      [143818, "I would still be"],
+      [144927, "holding you like this"],
+      [148219, "And all those fairy tales"],
+      [149631, "are full of shit"],
+      [152597, "One more fucking love song,"],
+      [154488, "I'll be sick"],
+      [156952, "Now I'm at a payphone"],
+      [158984, "Man, fuck that shit"],
+      [160307, "I be out spendin' all this"],
+      [161280, "money while you sittin' 'round"],
+      [162546, "Wondering why it wasn't"],
+      [163519, "you who came up from nothin'"],
+      [164602, "Made it from the bottom,"],
+      [165388, "now when you see me im stuntin"],
+      [166969, "And all of my cars start"],
+      [167813, "with the push of a button"],
+      [169057, "Telling me I changed since I"],
+      [170000, "blew up or whatever u call it"],
+      [171414, "Switched the number to my"],
+      [172309, "phone so u never could call it"],
+      [173612, "Don't need my name on my shirt"],
+      [174775, "you can tell that I'm ballin'"],
+      [175811, "Swish, what a shame,"],
+      [176920, "coulda got picked"],
+      [178085, "Had a really good game,"],
+      [179208, "but you missed your last shot"],
+      [180237, "So you talk about who"],
+      [181177, "you see at the top"],
+      [182055, "Or what you could've saw,"],
+      [182951, "but sad to say, it's over for"],
+      [184500, "Phantom pulled up,"],
+      [185226, "valet opened doors"],
+      [186771, "Wished I'd go away,"],
+      [187383, "got what you was looking for"],
+      [188867, "Now it's me who they want"],
+      [190069, "So you can go and take that"],
+      [191008, "little piece of shit with you"],
+      [191889, "I'm at a payphone,"],
+      [194064, "trying to call home"],
+      [196260, "All of my change,"],
+      [197507, "I spent on you"],
+      [200700, "Where have the times gone?"],
+      [202788, "Baby, it's all wrong"],
+      [204942, "Where are the plans"],
+      [206321, "we made for two?"],
+      [209188, "If happy-ever-afters did exist"],
+      [213603, "I would still be"],
+      [214822, "holding you like this"],
+      [217947, "And all these fairy tales"],
+      [219502, "are full of shit"],
+      [222418, "One more fucking love song,"],
+      [224266, "I'll be sick"],
+      [226662, "Now I'm at a payphone"],
+    ],
+  },
+  {
+    name: "Passenger - Let Her Go",
+    url: "https://www.youtube.com/watch?v=8a1eG-Y0u6Y",
+    lyrics: [
+      [12510, `Well, you only need the light`],
+      [13510, `when it's burning low`],
+      [16310, `Only miss the sun when it`],
+      [17310, `starts to snow`],
+      [19690, `Only know you love her when`],
+      [20690, `you let her go`],
+      [25880, `Only know you've been high`],
+      [26880, `when you're feeling low`],
+      [29710, `Only hate the road when`],
+      [30710, `you're missing home`],
+      [33230, `Only know you love her when`],
+      [34230, `you let her go`],
+      [39390, `And you let her go`],
+      [53420, `Staring at the bottom of`],
+      [54420, `your glass`],
+      [56170, `Hoping one day you'll make`],
+      [57170, `a dream last`],
+      [59380, `Dreams come slow and go`],
+      [60380, `so fast`],
+      [106620, `You see her when you close`],
+      [107620, `your eyes`],
+      [109360, `Maybe one day you'll`],
+      [110360, `understand why`],
+      [112680, `Everything you touch`],
+      [113680, `surely dies`],
+      [118830, `But you only need the light`],
+      [119830, `when it's burning low`],
+      [122630, `Only miss the sun when it`],
+      [123630, `starts to snow`],
+      [125900, `Only know you love her when`],
+      [126900, `you let her go`],
+      [132200, `Only know you've been high`],
+      [133200, `when you're feeling low`],
+      [135870, `Only hate the road when`],
+      [136870, `you're missing home`],
+      [139130, `Only know you love her when`],
+      [140130, `you let her go`],
+      [146520, `Staring at the ceiling in`],
+      [147520, `the dark`],
+      [149040, `Same old empty feeling in`],
+      [150040, `your heart`],
+      [152140, `'Cause love comes slow and`],
+      [153140, `it goes so fast`],
+      [199410, `Well, you see her when you`],
+      [200410, `fall asleep`],
+      [201780, `But never to touch and`],
+      [202780, `never to keep`],
+      [205050, `'Cause you loved her too much`],
+      [206050, `and dived too deep`],
+      [212060, `Well, you only need the light`],
+      [213060, `when it's burning low`],
+      [215800, `Only miss the sun when it`],
+      [216800, `starts to snow`],
+      [219120, `Only know you love her when`],
+      [220120, `you let her go`],
+      [225190, `Only know you've been high`],
+      [226190, `when you're feeling low`],
+      [229110, `Only hate the road when`],
+      [230110, `you're missing home`],
+      [232430, `Only know you love her when`],
+      [233430, `you let her go`],
+      [238660, `And you let her go`],
+      [245320, `And you let her go`],
+      [251940, `Well, you let her go`],
+      [305120, `Well, you only need the light`],
+      [306120, `when it's burning low`],
+      [308840, `Only miss the sun when it`],
+      [309840, `starts to snow`],
+      [312230, `Only know you love her when`],
+      [313230, `you let her go`],
+      [318220, `Only know you've been high`],
+      [319220, `when you're feeling low`],
+      [322210, `Only hate the road when`],
+      [323210, `you're missing home`],
+      [325620, `Only know you love her when`],
+      [326620, `you let her go`],
+      [331900, `Well, you only need the light`],
+      [332900, `when its burning low`],
+      [336040, `Only miss the sun when it`],
+      [337040, `starts to snow`],
+      [339750, `Only know you love her when`],
+      [340750, `you let her go`],
+      [346550, `Only know you've been high`],
+      [347550, `when you're feeling low`],
+      [350690, `Only hate the road when`],
+      [351690, `you're missing home`],
+      [354290, `Only know you love her when`],
+      [355290, `you let her go`],
+      [401390, `And you let her go`],
+    ],
+  },
+  {
+    name: "Busta Rhymes - Taking Everything",
+    lyrics: [
+      [811, "Yeah! Yeah! Yeah! Yeah!"],
+      [3062, "Let's go! Let's go!"],
+      [4300, "Let's go! Let's go!"],
+      [5969, "Yeah! Yeah! Yeah! Yeah!"],
+      [8300, "Let's go! Let's go!"],
+      [9583, "Let's go! Let's go!"],
+      [11464, "Yeah! Yeah! Yeah!"],
+      [14149, "You ain't courageous enough,"],
+      [15300, "most of you probably fold"],
+      [16728, "You ain't willin' to face"],
+      [17727, "the challenge acquire the gold"],
+      [19395, "We only here to just retrieve"],
+      [20486, "what you probably stole"],
+      [22091, "Yeah! Yeah! Yeah! Yeah!"],
+      [23228, "Yeah! Yeah! Yeah! Yeah!"],
+      [24784, "You see steel, sharpen steel"],
+      [26068, "when it's time for the go"],
+      [27407, "We here to create such"],
+      [28300, "a ruckus we all on a roll"],
+      [30099, "To every challenge in the eye,"],
+      [31361, "we don't play with the soul"],
+      [32700, "No matter what you was told,"],
+      [33800, "every rat find a hole"],
+      [35455, "See it don't matter"],
+      [36100, "what you thought"],
+      [37000, "(Yeah! Yeah! Yeah!)"],
+      [38029, "We takin' everything we want"],
+      [39467, "(Whoa! Whoa! Whoa!)"],
+      [40600, "Now don't forget it,"],
+      [41383, "better know we come to get it"],
+      [42791, "And we wit' it and"],
+      [43587, "there's nothing better,"],
+      [44499, "hope you know to play a sport"],
+      [46112, "See it don't matter"],
+      [46826, "what you thought"],
+      [47686, "(Yeah! Yeah! Yeah!)"],
+      [48757, "We takin' everything we want"],
+      [50152, "(Whoa! Whoa! Whoa!)"],
+      [51384, "Now don't forget it,"],
+      [52129, "better know we come to get it"],
+      [53545, "And we wit' it and"],
+      [54247, "there's nothing better,"],
+      [55194, "hope you know to play a sport"],
+      [56688, "See all the greatness when"],
+      [57660, "we come when the story is told"],
+      [59390, "Can't put a timeline"],
+      [60123, "on greatness it never gets old"],
+      [61962, "Come get the scope when"],
+      [62948, "we hot and you not"],
+      [64182, "And we pull up and we come in"],
+      [65559, "takin' everything you got, ugh"],
+      [77969, "See it don't matter"],
+      [78600, "what you thought"],
+      [79400, "(Yeah! Yeah! Yeah!)"],
+      [80600, "We takin' everything we want"],
+      [82128, "(Whoa! Whoa! Whoa!)"],
+      [83306, "Now don't forget it,"],
+      [84008, "better know we come to get it"],
+      [85400, "And we wit' it"],
+      [86168, "and there's nothing better,"],
+      [87072, "hope you know to play a sport"],
+      [90200, "(Yeah! Yeah! Yeah!)"],
+      [92800, "(Whoa! Whoa! Whoa!)"],
+      [95460, "(Yeah! Yeah! Yeah!)"],
+      [99169, "No matter what you thought,"],
+      [100200, "you better believe we comin'"],
+      [101900, "And if you thought"],
+      [102500, "that we was playin',"],
+      [103300, "let me show you something"],
+      [104723, "So then we jump"],
+      [105500, "and we swoop"],
+      [106157, "and we dodge every bullet"],
+      [107465, "It dont matter where they pull"],
+      [108500, "up when they try to pull it"],
+      [111200, "(Yeah! Yeah! Yeah!)"],
+      [113666, "(Whoa! Whoa! Whoa!)"],
+      [116853, "(Yeah! Yeah! Yeah!)"],
+      [120796, "Better know we on the clock"],
+      [122000, "and it's time to go (Yeah!)"],
+      [123500, "Everything is tactical,"],
+      [124500, "now enjoy the show (Yeah!)"],
+      [126237, "Then we skip"],
+      [126800, "and we bounce"],
+      [127587, "and we hop"],
+      [128100, "out of every situation"],
+      [129392, "Best believe that"],
+      [130212, "it's time to blow"],
+      [131300, "See it don't matter"],
+      [131900, "what you thought"],
+      [132800, "(Yeah! Yeah! Yeah!)"],
+      [133986, "We takin' everything we want"],
+      [135446, "(Whoa! Whoa! Whoa!)"],
+      [136666, "Now don't forget it,"],
+      [137300, "better know we come to get it"],
+      [138855, "And we wit' it"],
+      [139400, "and there's nothing better,"],
+      [140485, "hope you know to play a sport"],
+      [150000, "Hah! Hah! Hah! Hah!"],
+      [152700, "You know the heat melt,"],
+      [153300, "better wear your seat belt"],
+      [154500, "and strap up"],
+      [155369, "You know we get a little crazy"],
+      [156300, "every single time we ack up"],
+      [157800, "I know that the way you see"],
+      [158700, "us doin' it to 'em"],
+      [159300, "I think you really,"],
+      [159869, "really need to shack up"],
+      [160600, "Yeah! Yeah! Yeah! Yeah!"],
+      [168100, "Let's go! Let's go!"],
+      [169400, "Let's go! Let's go!"],
+      [173900, "See it don't matter"],
+      [174600, "what you thought"],
+      [175400, "(Yeah! Yeah! Yeah!)"],
+      [176574, "We takin' everything we want"],
+      [178100, "(Whoa! Whoa! Whoa!)"],
+      [179300, "Now don't forget it,"],
+      [180000, "better know we come to get it"],
+      [181300, "And we wit' it"],
+      [182000, "and there's nothing better,"],
+      [183102, "hope you know to play a sport"],
+      [184600, "See it don't matter"],
+      [185300, "what you thought"],
+      [186258, "(Yeah! Yeah! Yeah!)"],
+      [187369, "We takin' everything we want"],
+      [188817, "(Whoa! Whoa! Whoa!)"],
+      [189900, "Now don't forget it,"],
+      [190781, "better know we come to get it"],
+      [192000, "And we wit' it"],
+      [192852, "and there's nothing better,"],
+      [193800, "hope you know to play a sport"],
+    ],
+  },
+  {
+    name: "Italo Brothers - My Life is a Party",
+    url: "https://www.youtube.com/watch?v=F7GeEAP4wcI",
+    lyrics: [
+      [1900, "I say, hey, you say, ho"],
+      [5220, "Let's turn it up"],
+      [5620, "and here we go"],
+      [9830, "New York, LA, Berlin,"],
+      [10230, "say, hey"],
+      [16790, "To Tokyo, Rio de Janeiro,"],
+      [17190, "here we go, go"],
+      [24650, "Hello, hello"],
+      [28050, "Can you just feel it,"],
+      [28450, "are you ready to go?"],
+      [31610, "Hello, hello"],
+      [35590, "Do you receive my echo?"],
+      [38730, "My life is a party,"],
+      [39130, "my home is the club"],
+      [42890, "I party like a rock star,"],
+      [43290, "dance until I drop"],
+      [46150, "My life is a party,"],
+      [46550, "my home is the club"],
+      [50520, "My stage is the dance floor,"],
+      [50920, "party never stops"],
+      [53810, "My life is a party,"],
+      [54210, "my home is the club"],
+      [57930, "I party like a rock star,"],
+      [58330, "dance until I drop"],
+      [61300, "My life is a party,"],
+      [61700, "my home is the club"],
+      [65380, "My stage is the dance floor,"],
+      [65780, "party never stops"],
+      [69160, "And I say, hey,"],
+      [69560, "you say, ho"],
+      [72750, "Let's turn it up"],
+      [73150, "and here we go"],
+      [76720, "I say, hey,"],
+      [77120, "you say, ho"],
+      [80360, "You spin me 'round"],
+      [80760, "like a yo-yo"],
+      [84710, "DC, Paris Bel-Air,"],
+      [85110, "say, yeah"],
+      [91880, "To Monaco, Santo Domingo,"],
+      [92280, "here we go, go"],
+      [99860, "Hello, hello"],
+      [102980, "Can you just feel it,"],
+      [103380, "are you ready to go?"],
+      [106840, "Hello, hello"],
+      [110580, "Do you receive my echo?"],
+      [113720, "My life is a party,"],
+      [114120, "my home is the club"],
+      [117860, "I party like a rock star,"],
+      [118260, "dance until I drop"],
+      [121160, "My life is a party,"],
+      [121560, "my home is the club"],
+      [125320, "My stage is the dance floor,"],
+      [125720, "party never stops"],
+      [129060, "And I say, hey,"],
+      [129460, "you say, ho"],
+      [132860, "Let's turn it up"],
+      [133260, "and here we go"],
+      [136840, "I say, hey,"],
+      [137240, "you say, ho"],
+      [140180, "You spin me 'round"],
+      [140580, "like a yo-yo"],
+      [159740, "Hello, hello"],
+      [162890, "Can you just feel it,"],
+      [163290, "are you ready to go?"],
+      [166730, "Hello, hello"],
+      [170450, "Do you receive my echo?"],
+      [173680, "My life is a party,"],
+      [174080, "my home is the club"],
+      [177850, "I party like a rock star,"],
+      [178250, "dance until I drop"],
+      [181240, "My life is a party,"],
+      [181640, "my home is the club"],
+      [185330, "My stage is the dance floor,"],
+      [185730, "party never stops"],
+      [189190, "And I say, hey,"],
+      [189590, "you say, ho"],
+      [192860, "Let's turn it up"],
+      [193260, "and here we go"],
+      [196860, "I say, hey,"],
+      [197260, "you say, ho"],
+      [200370, "You spin me 'round"],
+      [200770, "like a yo-yo"],
+    ],
+  },
+  {
+    name: "Devil May Cry 5 - Devils Never Cry",
+    url: "https://www.youtube.com/watch?v=JUaBL5lpPdI",
+    lyrics: [
+      [26000, `Bless me with your gift of`],
+      [27000, `light`],
+      [29990, `Righteous cause on judgement`],
+      [30990, `night`],
+      [32870, `Feel the sorrow the light`],
+      [33870, `has swallowed`],
+      [35240, `Feel the freedom like no`],
+      [36240, `tomorrow`],
+      [51970, `Stepping forth a cure for`],
+      [52970, `our soul's demise`],
+      [55780, `Reap the tears of victim's`],
+      [56780, `cries`],
+      [58000, `Yearning more to hear the`],
+      [59000, `suffer of a`],
+      [61670, `Of a demon as i put it`],
+      [62670, `under`],
+      [64340, `Killed before,a time to`],
+      [65340, `kill them all`],
+      [68360, `Passed down the righteous law`],
+      [70670, `Serve a justice that dwells`],
+      [71670, `in me`],
+      [73870, `Lifeless corpse as far the`],
+      [74870, `eye can see`],
+      [79870, `The eye can see`],
+      [82120, `The eye can see`],
+      [87890, `The eye can see`],
+      [89970, `Bless me with the leaf off`],
+      [90970, `of the tree`],
+      [96270, `On it, i see the freedom`],
+      [97270, `reign`],
+      [102080, `We are falling,the light is`],
+      [103080, `calling`],
+      [108990, `Tears inside me calm me down`],
+      [114980, `Midnight calling mist of`],
+      [115980, `resolving`],
+      [122120, `Crown me with the pure green`],
+      [123120, `leaf`],
+      [127870, `Praise to my father,blessed`],
+      [128870, `by the water`],
+      [134920, `Black night,dark sky,the`],
+      [135920, `Devil's cry`],
+      [140980, `Bless me with the (life of`],
+      [141980, `vengeance, a passive test)`],
+      [144230, `Leaf off of the tree (until`],
+      [145230, `the gravel I will rest)`],
+      [147780, `On it, I see (engage the`],
+      [148780, `pressure until it crumbles)`],
+      [150200, `The freedom reign (the`],
+      [151200, `existence of black souls)`],
+      [154080, `We are falling (onward to a`],
+      [155080, `sacred battlefield)`],
+      [156970, `The light is calling (where`],
+      [157970, `limits are revealed)`],
+      [160780, `Tears inside me (tools of`],
+      [161780, `steel,in rage they conquer)`],
+      [163960, `Calm me down (weed out the`],
+      [164960, `killing of victim's stalker)`],
+      [166890, `Midnight calling (the powers`],
+      [167890, `proven to end the madness)`],
+      [169880, `Mist of resolving (upon I`],
+      [170880, `take it to end the savage)`],
+      [172730, `Crown me with the (the rays`],
+      [173730, `of light a truth of meaning)`],
+      [176050, `Pure green leaf (to my`],
+      [177050, `father the blood is pleading)`],
+      [179760, `Bless me with the (a justice`],
+      [180760, `rage for all to feel)`],
+      [182890, `Leaf off of the tree (with`],
+      [183890, `innocent hatred squeals)`],
+      [185890, `On it, I see (the gore of`],
+      [186890, `evil seems to satisfy)`],
+      [188890, `The freedom reign (when`],
+      [189880, `slain a maimed and pacified)`],
+      [192030, `Praise to my father, Bless`],
+      [193030, `by the water`],
+      [198760, `Black night,dark sky,the`],
+      [199760, `Devil's cry`],
+    ],
+  },
+];
+
+const audios = musicTracks.map(() => null);
+
+let musicMenuOpen = false;
+let currentAudio = null;
+let currentTrackIndex = -1;
+let ytApiReady = false;
+let ytApiLoading = false;
+let ytPlayer = null;
+let ytAudio = null;
+let ytTick = 0;
+let ytApiCallbacks = [];
+let autoChatLyrics = true;
+let musicDrag = { active: false, dx: 0, dy: 0 };
+let musicStatusEl = null;
+let musicTimeEl = null;
+let musicDurEl = null;
+let musicSeekEl = null;
+let musicScrub = false;
+let musicNowPlayingEl = null;
+let musicLyricEl = null;
+
+class SongPlayer {
+  constructor() {
+    this.songs = musicTracks.map((track, i) => ({
+      name: track.name || `Track ${i + 1}`,
+      url: track.url || null,
+      lyrics: (track.lyrics || []).slice(),
+      index: 0,
+    }));
+    this.playing = false;
+    this.currentSong = -1;
+    this.currentTime = 0;
+    this.lastUpdate = 0;
+    this.updateInterval = null;
+    this.lastSentTime = -1000;
+  }
+
+  sendLyric(text) {
+    if (!text || isChatActive()) return;
+    const msg = String(text).trim().slice(0, 30);
+    if (msg) packet("6", msg);
+  }
+
+  playSong(id) {
+    if (id < 0 || id >= this.songs.length) return;
+
+    if (this.playing && this.currentSong === id) return;
+
+    if (this.playing) {
+      this.stopLyrics();
+    }
+
+    this.currentSong = id;
+    this.currentTime = 0;
+    this.songs[id].index = 0;
+    this.lastSentTime = -1000;
+    this.playing = true;
+    this.lastUpdate = Date.now();
+
+    if (this.updateInterval) clearInterval(this.updateInterval);
+
+    this.updateInterval = setInterval(() => {
+      if (!this.playing) return;
+
+      // Check if audio is paused
+      if (currentAudio) {
+        if (currentAudio._type === "youtube") {
+          if (
+            ytPlayer &&
+            ytPlayer.getPlayerState &&
+            ytPlayer.getPlayerState() !== 1
+          )
+            return;
+        } else if (currentAudio.paused) {
+          return;
+        }
+      }
+
+      const now = Date.now();
+      const delta = now - this.lastUpdate;
+      this.lastUpdate = now;
+      this.currentTime += delta;
+
+      if (!autoChatLyrics) return;
+
+      const song = this.songs[this.currentSong];
+      if (!song || !song.lyrics) return;
+
+      const lyric = song.lyrics[song.index];
+      if (lyric) {
+        const time = lyric[0];
+        const text = lyric[1];
+
+        if (
+          this.currentTime >= time - 150 &&
+          this.currentTime - this.lastSentTime > 500
+        ) {
+          this.sendLyric(text);
+          this.lastSentTime = this.currentTime;
+          song.index++;
+
+          if (musicLyricEl) {
+            const lyricText = musicLyricEl.querySelector("#musicLyricText");
+            if (lyricText) {
+              lyricText.textContent = text;
+            } else {
+              musicLyricEl.textContent = text;
+            }
+            musicLyricEl.style.animation = "none";
+            musicLyricEl.offsetHeight;
+            musicLyricEl.style.animation = "lyricPulse 0.3s ease-out";
+          }
+          if (typeof window.updateActiveLyricInList === "function") {
+            window.updateActiveLyricInList(this.currentTime);
+          }
+        }
+      } else if (song.index >= song.lyrics.length) {
+        // No more lyrics, but keep playing
+      }
+    }, 50);
+  }
+
+  stopLyrics() {
+    this.playing = false;
+    if (this.updateInterval) {
+      clearInterval(this.updateInterval);
+      this.updateInterval = null;
+    }
+    this.currentTime = 0;
+    this.lastSentTime = -1000;
+    if (this.currentSong >= 0 && this.songs[this.currentSong]) {
+      this.songs[this.currentSong].index = 0;
+    }
+  }
+
+  syncTime(audioTime) {
+    this.currentTime = audioTime * 1000;
+    this.lastUpdate = Date.now();
+
+    if (this.currentSong >= 0 && this.songs[this.currentSong]) {
+      const song = this.songs[this.currentSong];
+      song.index = 0;
+      while (
+        song.index < song.lyrics.length &&
+        song.lyrics[song.index][0] <= this.currentTime
+      ) {
+        song.index++;
+      }
+    }
+  }
+
+  reset() {
+    this.stopLyrics();
+    this.currentSong = -1;
+    if (musicLyricEl) {
+      const lyricText = musicLyricEl.querySelector("#musicLyricText");
+      if (lyricText) {
+        lyricText.textContent = "♪ No lyrics";
+      } else {
+        musicLyricEl.textContent = "♪ No lyrics";
+      }
+    }
+  }
+}
+
+const songPlayer = new SongPlayer();
+
+function isYouTubeUrl(url) {
+  return /youtube\.com\/watch\?v=|youtu\.be\//i.test(String(url || ""));
+}
+
+function getYouTubeId(url) {
+  try {
+    const u = new URL(String(url));
+    if (u.hostname.includes("youtu.be")) {
+      return u.pathname.replace("/", "").trim() || null;
+    }
+    if (u.searchParams.has("v")) return u.searchParams.get("v");
+  } catch (_) { }
+  const m = String(url || "").match(/(?:v=|\/)([a-zA-Z0-9_-]{6,})/);
+  return m ? m[1] : null;
+}
+
+function ensureYouTubeApi(cb) {
+  if (ytApiReady) return cb();
+  if (ytApiLoading) {
+    ytApiCallbacks.push(cb);
+    return;
+  }
+  ytApiLoading = true;
+  ytApiCallbacks.push(cb);
+  const prev = window.onYouTubeIframeAPIReady;
+  window.onYouTubeIframeAPIReady = () => {
+    ytApiReady = true;
+    ytApiLoading = false;
+    if (typeof prev === "function") prev();
+    const cbs = ytApiCallbacks.slice();
+    ytApiCallbacks = [];
+    cbs.forEach((fn) => {
+      try {
+        fn();
+      } catch (e) {
+        console.error("YT API callback error:", e);
+      }
+    });
+  };
+  const s = document.createElement("script");
+  s.src = "https://www.youtube.com/iframe_api";
+  s.onerror = () => {
+    ytApiLoading = false;
+    setMusicStatus("Failed to load YouTube API");
+    ytApiCallbacks = [];
+  };
+  document.head.appendChild(s);
+  setTimeout(() => {
+    if (!ytApiReady && ytApiLoading) {
+      ytApiLoading = false;
+      setMusicStatus("YouTube API timeout");
+      ytApiCallbacks = [];
+    }
+  }, 10000);
+}
+
+function ensureYouTubePlayer(videoId, onReady) {
+  const holderId = "musicYoutubeHolder";
+  let holder = document.getElementById(holderId);
+  if (!holder) {
+    holder = document.createElement("div");
+    holder.id = holderId;
+    holder.style.position = "fixed";
+    holder.style.left = "-9999px";
+    holder.style.top = "-9999px";
+    holder.style.width = "200px";
+    holder.style.height = "200px";
+    holder.style.opacity = "0";
+    holder.style.pointerEvents = "none";
+    document.body.appendChild(holder);
+  }
+  if (!ytAudio) {
+    ytAudio = {
+      _type: "youtube",
+      pause() {
+        if (ytPlayer) ytPlayer.pauseVideo();
+      },
+      play() {
+        if (ytPlayer) ytPlayer.playVideo();
+      },
+      load() { },
+      get currentTime() {
+        return ytPlayer ? ytPlayer.getCurrentTime() : 0;
+      },
+      set currentTime(v) {
+        if (ytPlayer) ytPlayer.seekTo(Math.max(0, v || 0), true);
+      },
+      get duration() {
+        return ytPlayer ? ytPlayer.getDuration() : 0;
+      },
+      get paused() {
+        if (!ytPlayer || !window.YT || !window.YT.PlayerState) return true;
+        return ytPlayer.getPlayerState() !== window.YT.PlayerState.PLAYING;
+      },
+    };
+  }
+  if (ytPlayer) {
+    try {
+      ytPlayer.loadVideoById(videoId);
+    } catch (e) {
+      console.error("YT loadVideoById error:", e);
+      setMusicStatus("Failed to load video");
+      return;
+    }
+    if (typeof onReady === "function") onReady();
+    return;
+  }
+  ytPlayer = new YT.Player(holderId, {
+    height: "200",
+    width: "200",
+    videoId,
+    playerVars: {
+      autoplay: 1,
+      controls: 0,
+      disablekb: 1,
+      fs: 0,
+      iv_load_policy: 3,
+      modestbranding: 1,
+      rel: 0,
+      playsinline: 1,
+      origin: window.location.origin,
+    },
+    events: {
+      onReady: () => {
+        if (typeof onReady === "function") onReady();
+      },
+      onStateChange: (ev) => {
+        if (currentAudio !== ytAudio) return;
+        if (ev.data === YT.PlayerState.PLAYING) {
+          setMusicStatus("");
+          startLyrics(currentTrackIndex);
+          syncLyrics();
+        } else if (ev.data === YT.PlayerState.ENDED) {
+          stopMusic();
+        } else if (ev.data === YT.PlayerState.BUFFERING) {
+          setMusicStatus("Buffering...");
+        } else if (ev.data === YT.PlayerState.UNSTARTED) {
+          setTimeout(() => {
+            if (
+              ytPlayer &&
+              ytPlayer.getPlayerState &&
+              ytPlayer.getPlayerState() === -1
+            ) {
+              setMusicStatus("Video unavailable");
+            }
+          }, 3000);
+        }
+      },
+      onError: (ev) => {
+        const errCodes = {
+          2: "Invalid video ID",
+          5: "HTML5 player error",
+          100: "Video not found",
+          101: "Embedding disabled",
+          150: "Embedding disabled",
+        };
+        const msg = errCodes[ev.data] || `YouTube error ${ev.data}`;
+        console.error("YouTube player error:", ev.data, msg);
+        setMusicStatus(msg);
+      },
+    },
+  });
+}
+
+function startYtTicker() {
+  if (ytTick) clearInterval(ytTick);
+  ytTick = setInterval(() => {
+    if (currentAudio !== ytAudio) return;
+    if (!musicTimeEl) return;
+    const sec = ytAudio.currentTime || 0;
+    const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+    const ss = String(Math.floor(sec % 60)).padStart(2, "0");
+    musicTimeEl.textContent = `${mm}:${ss}`;
+    if (musicSeekEl && !musicScrub) musicSeekEl.value = String(sec);
+    if (musicDurEl) {
+      const dur = ytAudio.duration || 0;
+      const dmm = String(Math.floor(dur / 60)).padStart(2, "0");
+      const dss = String(Math.floor(dur % 60)).padStart(2, "0");
+      musicDurEl.textContent = `${dmm}:${dss}`;
+    }
+    if (musicSeekEl) {
+      const max = Math.max(0, ytAudio.duration || 0);
+      if (musicSeekEl.max !== String(max)) musicSeekEl.max = String(max);
+    }
+  }, 250);
+}
+
+function stopYtTicker() {
+  if (ytTick) clearInterval(ytTick);
+  ytTick = 0;
+}
+
+function getStore(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (_) {
+    return null;
+  }
+}
+
+function setStore(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (_) { }
+}
+
+function getTrackLabel(track, index) {
+  if (track && track.name && String(track.name).trim()) return track.name;
+  const url = track && track.url ? String(track.url) : "";
+  if (url) {
+    let base = url.split("/").pop() || "";
+    base = base.split("?")[0];
+    base = base.replace(/\.[a-z0-9]+$/i, "");
+    base = base.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+    if (base) return base;
+  }
+  return `Track ${index + 1}`;
+}
+
+function setMusicStatus(text) {
+  if (musicStatusEl) musicStatusEl.textContent = text || "";
+}
+
+function parseLrc(text) {
+  if (!text) return [];
+  const lines = String(text).split(/\r?\n/);
+  const out = [];
+  for (const line of lines) {
+    const matches = line.match(/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g);
+    if (!matches) continue;
+    const lyric = line.replace(/\[[^\]]+\]/g, "").trim();
+    if (!lyric) continue;
+    const lower = lyric.toLowerCase();
+    if (lower.startsWith("ti:")) continue;
+    if (lower.startsWith("ar:")) continue;
+    if (lower.startsWith("al:")) continue;
+    if (lower.startsWith("by:")) continue;
+    if (lower.startsWith("offset:")) continue;
+    if (lower.includes(" - ") && matches.length === 1) continue;
+    if (lower.includes("official") || lower.includes("lyrics")) continue;
+    for (const tag of matches) {
+      const m = tag.match(/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/);
+      if (!m) continue;
+      const mm = parseInt(m[1], 10) || 0;
+      const ss = parseInt(m[2], 10) || 0;
+      const msRaw = m[3] ? m[3] : "0";
+      const ms =
+        msRaw.length === 3
+          ? parseInt(msRaw, 10)
+          : parseInt(msRaw.padEnd(3, "0"), 10);
+      const delay = mm * 60000 + ss * 1000 + ms;
+      if (lyric) out.push({ chat: lyric, delay });
+    }
+  }
+  out.sort((a, b) => a.delay - b.delay);
+  return out;
+}
+
+function stopMusic() {
+  songPlayer.reset();
+  setMusicStatus("");
+  if (musicTimeEl) musicTimeEl.textContent = "00:00";
+  if (musicSeekEl) musicSeekEl.value = "0";
+  if (musicNowPlayingEl) musicNowPlayingEl.textContent = "";
+  if (musicLyricEl) {
+    const lyricText = musicLyricEl.querySelector("#musicLyricText");
+    if (lyricText) {
+      lyricText.textContent = "♪ No lyrics";
+    } else {
+      musicLyricEl.textContent = "♪ No lyrics";
+    }
+  }
+  stopYtTicker();
+  currentTrackIndex = -1;
+  if (currentAudio) {
+    if (currentAudio._type === "youtube") {
+      if (ytPlayer) {
+        ytPlayer.stopVideo();
+      }
+    } else {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    }
+    currentAudio = null;
+  }
+}
+
+function startLyrics(index) {
+  songPlayer.playSong(index);
+}
+
+function syncLyrics() {
+  if (currentAudio && !currentAudio.paused) {
+    songPlayer.syncTime(currentAudio.currentTime);
+  }
+}
+
+function playMusic(index) {
+  stopMusic();
+  currentTrackIndex = index;
+  if (typeof window.updateMusicDropdown === "function") {
+    window.updateMusicDropdown(index);
+  }
+  let audio = audios[index];
+  const track = musicTracks[index];
+  if (!track || !track.url) {
+    setMusicStatus("Missing track URL");
+    return;
+  }
+  if (isYouTubeUrl(track.url)) {
+    const videoId = getYouTubeId(track.url);
+    if (!videoId) {
+      setMusicStatus("Invalid YouTube URL");
+      return;
+    }
+    setMusicStatus("Loading...");
+    ensureYouTubeApi(() => {
+      ensureYouTubePlayer(videoId, () => {
+        currentAudio = ytAudio;
+        startYtTicker();
+        if (ytPlayer) ytPlayer.playVideo();
+      });
+    });
+    return;
+  }
+  if (!audio) {
+    audio = new Audio(track.url);
+    audio.loop = false;
+    audio.preload = "auto";
+    audios[index] = audio;
+  }
+  currentAudio = audio;
+  setMusicStatus("Loading...");
+  audio.load();
+  audio.volume = 0.6;
+  audio.muted = false;
+  audio.onwaiting = () => {
+    if (currentAudio === audio) setMusicStatus("Buffering...");
+  };
+  audio.onstalled = () => {
+    if (currentAudio === audio) setMusicStatus("Buffering...");
+  };
+  audio.onplaying = () => {
+    if (currentAudio === audio) {
+      setMusicStatus("");
+      if (typeof window.updatePlayButton === "function")
+        window.updatePlayButton();
+    }
+  };
+  audio.onplay = () => {
+    if (currentAudio === audio) {
+      startLyrics(index);
+      syncLyrics();
+      if (typeof window.updatePlayButton === "function")
+        window.updatePlayButton();
+    }
+  };
+  audio.onpause = () => {
+    if (currentAudio === audio) {
+      if (typeof window.updatePlayButton === "function")
+        window.updatePlayButton();
+    }
+  };
+  audio.onseeked = () => {
+    if (currentAudio === audio) syncLyrics();
+  };
+  audio.onloadedmetadata = () => {
+    if (currentAudio !== audio) return;
+    if (musicSeekEl) musicSeekEl.max = String(Math.max(0, audio.duration || 0));
+    if (musicDurEl) {
+      const sec = audio.duration || 0;
+      const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+      const ss = String(Math.floor(sec % 60)).padStart(2, "0");
+      musicDurEl.textContent = `${mm}:${ss}`;
+    }
+  };
+  audio.oncanplay = () => {
+    if (currentAudio === audio) setMusicStatus("");
+  };
+  audio.ontimeupdate = () => {
+    if (currentAudio !== audio) return;
+    if (!musicTimeEl) return;
+    const sec = audio.currentTime || 0;
+    const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+    const ss = String(Math.floor(sec % 60)).padStart(2, "0");
+    musicTimeEl.textContent = `${mm}:${ss}`;
+    if (musicSeekEl && !musicScrub) musicSeekEl.value = String(sec);
+  };
+  audio.onerror = () => {
+    if (currentAudio === audio) setMusicStatus("Failed to load audio");
+  };
+  audio.play().catch(() => {
+    if (currentAudio === audio) setMusicStatus("Playback blocked");
+  });
+}
+
+function buildMusicMenu() {
+  let menu = document.getElementById("musicMenu");
+  if (menu) return menu;
+
+  const style = document.createElement("style");
+  style.textContent = `
+    @keyframes lyricPulse {
+      0% { transform: scale(1.05); opacity: 1; }
+      100% { transform: scale(1); opacity: 0.9; }
+    }
+    @keyframes musicMenuIn {
+      0% { opacity: 0; transform: translateY(-10px) scale(0.95); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes musicMenuOut {
+      0% { opacity: 1; transform: translateY(0) scale(1); }
+      100% { opacity: 0; transform: translateY(-10px) scale(0.95); }
+    }
+    #musicMenu {
+      background: linear-gradient(135deg, rgba(30, 25, 40, 0.95) 0%, rgba(20, 15, 30, 0.98) 100%);
+      border: 1px solid rgba(160, 100, 255, 0.3);
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(160, 100, 255, 0.1);
+      backdrop-filter: blur(10px);
+    }
+    #musicMenu.show { animation: musicMenuIn 0.25s ease-out forwards; }
+    #musicMenu.hide { animation: musicMenuOut 0.2s ease-in forwards; }
+    #musicMenuHeader {
+      background: linear-gradient(90deg, rgba(160, 100, 255, 0.2) 0%, transparent 100%);
+      padding: 10px 12px;
+      margin: -12px -12px 12px -12px;
+      border-radius: 12px 12px 0 0;
+      border-bottom: 1px solid rgba(160, 100, 255, 0.2);
+      cursor: move;
+      font-weight: bold;
+      color: #a6f;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #musicMenuHeader::before {
+      content: "♪";
+      font-size: 18px;
+    }
+    #musicNowPlaying {
+      color: #b8f;
+      font-size: 11px;
+      margin-top: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0.8;
+    }
+    #musicLyric {
+      color: #fff;
+      font-size: 13px;
+      min-height: 20px;
+      padding: 8px 12px;
+      margin: 8px 0;
+      background: rgba(160, 100, 255, 0.1);
+      border-radius: 6px;
+      text-align: center;
+      font-style: italic;
+      cursor: pointer;
+      transition: background 0.35s ease;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    #musicLyric:hover {
+      background: rgba(160, 100, 255, 0.2);
+    }
+    #musicLyricText {
+      flex: 1;
+      text-align: center;
+    }
+    #musicLyricExpand {
+      font-size: 10px;
+      color: #a6f;
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+    #musicLyric.expanded #musicLyricExpand {
+      transform: rotate(180deg);
+    }
+    #musicLyricsPanel {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease-out;
+      margin: 0 -4px;
+    }
+    #musicLyricsPanel.expanded {
+      max-height: 200px;
+    }
+    #musicLyricsList {
+      max-height: 200px;
+      overflow-y: auto;
+      background: rgba(20, 20, 30, 0.6);
+      border-radius: 6px;
+      padding: 4px;
+      margin-bottom: 8px;
+    }
+    #musicLyricsList::-webkit-scrollbar {
+      width: 6px;
+    }
+    #musicLyricsList::-webkit-scrollbar-track {
+      background: rgba(160, 100, 255, 0.1);
+      border-radius: 3px;
+    }
+    #musicLyricsList::-webkit-scrollbar-thumb {
+      background: rgba(160, 100, 255, 0.3);
+      border-radius: 3px;
+    }
+    #musicLyricsList::-webkit-scrollbar-thumb:hover {
+      background: rgba(160, 100, 255, 0.5);
+    }
+    .lyricLine {
+      padding: 6px 10px;
+      margin: 2px 0;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      color: #888;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .lyricLine:hover {
+      background: rgba(160, 100, 255, 0.2);
+      color: #fff;
+    }
+    .lyricLine.active {
+      background: rgba(160, 100, 255, 0.3);
+      color: #a6f;
+      font-weight: 500;
+    }
+    .lyricLine .lyricTime {
+      font-size: 10px;
+      color: #666;
+      min-width: 36px;
+    }
+    .lyricLine.active .lyricTime {
+      color: #a6f;
+    }
+    .customDropdown {
+      position: relative;
+      width: 100%;
+      margin-top: 8px;
+    }
+    .dropdownSelected {
+      background: rgba(40, 35, 60, 0.8);
+      border: 1px solid rgba(160, 100, 255, 0.3);
+      border-radius: 6px;
+      color: #fff;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      user-select: none;
+    }
+    .dropdownSelected:hover {
+      border-color: rgba(160, 100, 255, 0.5);
+      background: rgba(50, 45, 70, 0.8);
+    }
+    .dropdownSelected.open {
+      border-color: rgba(160, 100, 255, 0.7);
+      border-radius: 6px 6px 0 0;
+    }
+    .dropdownArrow {
+      transition: transform 0.2s;
+      font-size: 10px;
+      color: #a6f;
+    }
+    .dropdownSelected.open .dropdownArrow {
+      transform: rotate(180deg);
+    }
+    .dropdownOptions {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: rgba(30, 25, 45, 0.98);
+      border: 1px solid rgba(160, 100, 255, 0.5);
+      border-top: none;
+      border-radius: 0 0 6px 6px;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.25s ease-out;
+      z-index: 100;
+    }
+    .dropdownOptions.open {
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .dropdownOptions::-webkit-scrollbar {
+      width: 6px;
+    }
+    .dropdownOptions::-webkit-scrollbar-track {
+      background: rgba(160, 100, 255, 0.1);
+    }
+    .dropdownOptions::-webkit-scrollbar-thumb {
+      background: rgba(160, 100, 255, 0.3);
+      border-radius: 3px;
+    }
+    .dropdownOption {
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      color: #aaa;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(160, 100, 255, 0.1);
+    }
+    .dropdownOption:last-child {
+      border-bottom: none;
+    }
+    .dropdownOption:hover {
+      background: rgba(160, 100, 255, 0.2);
+      color: #fff;
+    }
+    .dropdownOption.selected {
+      background: rgba(160, 100, 255, 0.15);
+      color: #a6f;
+    }
+    .musicBtn {
+      background: linear-gradient(135deg, rgba(160, 100, 255, 0.3) 0%, rgba(130, 80, 200, 0.3) 100%);
+      border: 1px solid rgba(160, 100, 255, 0.4);
+      border-radius: 6px;
+      color: #fff;
+      padding: 8px 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+      font-weight: 500;
+    }
+    .musicBtn:hover {
+      background: linear-gradient(135deg, rgba(160, 100, 255, 0.5) 0%, rgba(130, 80, 200, 0.5) 100%);
+      border-color: rgba(160, 100, 255, 0.6);
+      transform: translateY(-1px);
+    }
+    .musicBtn:active {
+      transform: translateY(0);
+    }
+    .musicBtn.stop {
+      background: linear-gradient(135deg, rgba(255, 100, 100, 0.3) 0%, rgba(200, 80, 80, 0.3) 100%);
+      border-color: rgba(255, 100, 100, 0.4);
+    }
+    .musicBtn.stop:hover {
+      background: linear-gradient(135deg, rgba(255, 100, 100, 0.5) 0%, rgba(200, 80, 80, 0.5) 100%);
+      border-color: rgba(255, 100, 100, 0.6);
+    }
+    #musicSeek {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 6px;
+      background: rgba(160, 100, 255, 0.2);
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    #musicSeek::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      background: linear-gradient(135deg, #b8f 0%, #a6f 100%);
+      border-radius: 50%;
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+    #musicSeek::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+    #musicStatus {
+      color: #fa8;
+      font-size: 11px;
+      min-height: 16px;
+    }
+    .musicCheckLabel {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #aaa;
+      font-size: 12px;
+      cursor: pointer;
+      padding: 6px 0;
+      transition: color 0.2s;
+    }
+    .musicCheckLabel:hover { color: #fff; }
+    .musicCheckLabel input {
+      accent-color: #a6f;
+    }
+  `;
+  document.head.appendChild(style);
+
+  menu = document.createElement("div");
+  menu.id = "musicMenu";
+  menu.style.position = "fixed";
+  menu.style.left = "20px";
+  menu.style.top = "90px";
+  menu.style.zIndex = "10002";
+  menu.style.display = "none";
+  menu.style.width = "340px";
+  menu.style.padding = "12px";
+  menu.style.cursor = "default";
+
+  menu.innerHTML = `
+    <div id="musicMenuHeader">Music Player</div>
+    <div id="musicNowPlaying"></div>
+    <div class="customDropdown">
+      <div class="dropdownSelected" id="musicDropdownBtn">
+        <span id="musicDropdownText">Select a track...</span>
+        <span class="dropdownArrow">▼</span>
+      </div>
+      <div class="dropdownOptions" id="musicDropdownOptions"></div>
+    </div>
+    <div id="musicLyric" title="Click to expand lyrics">
+      <span id="musicLyricText">♪ No lyrics</span>
+      <span id="musicLyricExpand">▼</span>
+    </div>
+    <div id="musicLyricsPanel">
+      <div id="musicLyricsList"></div>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <div id="musicPlay" class="musicBtn" style="flex:1;">▶ Play</div>
+      <div id="musicStop" class="musicBtn stop" style="flex:1;">■ Stop</div>
+    </div>
+    <div id="musicStatus" style="margin-top:8px;"></div>
+    <div style="display:flex; align-items:center; gap:10px; margin-top:8px;">
+      <span id="musicTime" style="color:#a6f; font-size:12px; min-width:40px;">00:00</span>
+      <input id="musicSeek" type="range" min="0" max="0" step="0.01" value="0" style="flex:1;">
+      <span id="musicDur" style="color:#888; font-size:12px; min-width:40px;">00:00</span>
+    </div>
+    <label class="musicCheckLabel" style="margin-top:10px;">
+      <input id="musicAutoChat" type="checkbox" checked />
+      <span>Auto-chat lyrics</span>
+    </label>
+    <div style="color:#666; font-size:10px; margin-top:4px;">Press U to toggle menu</div>
+  `;
+
+  document.body.appendChild(menu);
+
+  const savedPos = getStore("musicMenuPos");
+  if (savedPos) {
+    try {
+      const pos = JSON.parse(savedPos);
+      if (typeof pos.x === "number" && typeof pos.y === "number") {
+        menu.style.left = `${pos.x}px`;
+        menu.style.top = `${pos.y}px`;
+      }
+    } catch (_) { }
+  }
+
+  musicNowPlayingEl = menu.querySelector("#musicNowPlaying");
+  musicLyricEl = menu.querySelector("#musicLyric");
+
+  const header = menu.querySelector("#musicMenuHeader");
+  header.addEventListener("mousedown", (e) => {
+    musicDrag.active = true;
+    const rect = menu.getBoundingClientRect();
+    musicDrag.dx = e.clientX - rect.left;
+    musicDrag.dy = e.clientY - rect.top;
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!musicDrag.active) return;
+    const x = Math.max(
+      10,
+      Math.min(window.innerWidth - 20, e.clientX - musicDrag.dx),
+    );
+    const y = Math.max(
+      10,
+      Math.min(window.innerHeight - 20, e.clientY - musicDrag.dy),
+    );
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+  });
+  document.addEventListener("mouseup", () => {
+    if (!musicDrag.active) return;
+    musicDrag.active = false;
+    setStore(
+      "musicMenuPos",
+      JSON.stringify({
+        x: parseInt(menu.style.left, 10) || 20,
+        y: parseInt(menu.style.top, 10) || 90,
+      }),
+    );
+  });
+
+  const dropdownBtn = menu.querySelector("#musicDropdownBtn");
+  const dropdownText = menu.querySelector("#musicDropdownText");
+  const dropdownOptions = menu.querySelector("#musicDropdownOptions");
+  const lyricsPanel = menu.querySelector("#musicLyricsPanel");
+  const lyricsList = menu.querySelector("#musicLyricsList");
+  let dropdownOpen = false;
+  let selectedTrackIndex = 0;
+
+  // Build dropdown options
+  // Sort tracks alphabetically while preserving original indices
+  const sortedTracks = musicTracks
+    .map((track, i) => ({ track, originalIndex: i }))
+    .sort((a, b) => a.track.name.localeCompare(b.track.name));
+
+  sortedTracks.forEach(({ track, originalIndex }) => {
+    const opt = document.createElement("div");
+    opt.className = "dropdownOption";
+    opt.textContent = track.name;
+    opt.dataset.index = originalIndex;
+    opt.addEventListener("click", () => {
+      selectedTrackIndex = originalIndex;
+      dropdownText.textContent = track.name;
+      document
+        .querySelectorAll(".dropdownOption")
+        .forEach((o) => o.classList.remove("selected"));
+      opt.classList.add("selected");
+      closeDropdown();
+      playMusic(originalIndex);
+      const playBtn = document.querySelector("#musicPlay");
+      if (playBtn) playBtn.textContent = "⏸ Pause";
+    });
+    dropdownOptions.appendChild(opt);
+  });
+
+  function closeDropdown() {
+    dropdownOpen = false;
+    dropdownBtn.classList.remove("open");
+    dropdownOptions.classList.remove("open");
+  }
+
+  dropdownBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dropdownOpen = !dropdownOpen;
+    dropdownBtn.classList.toggle("open", dropdownOpen);
+    dropdownOptions.classList.toggle("open", dropdownOpen);
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!dropdownOptions.contains(e.target) && e.target !== dropdownBtn) {
+      closeDropdown();
+    }
+  });
+
+  // Lyrics panel expand/collapse
+  musicLyricEl.addEventListener("click", () => {
+    lyricsPanel.classList.toggle("expanded");
+    musicLyricEl.classList.toggle("expanded");
+  });
+
+  function updateLyricsList(trackIndex) {
+    lyricsList.innerHTML = "";
+    const track = musicTracks[trackIndex];
+    if (!track || !track.lyrics || !track.lyrics.length) {
+      lyricsList.innerHTML =
+        '<div style="padding:12px;color:#666;text-align:center;font-size:12px;">No lyrics available</div>';
+      return;
+    }
+    track.lyrics.forEach((line, i) => {
+      const div = document.createElement("div");
+      div.className = "lyricLine";
+      div.dataset.index = i;
+      div.dataset.time = line[0];
+      const timeMs = line[0];
+      const timeSec = Math.floor(timeMs / 1000);
+      const mins = Math.floor(timeSec / 60);
+      const secs = timeSec % 60;
+      div.innerHTML = `<span class="lyricTime">${mins}:${secs.toString().padStart(2, "0")}</span><span>${line[1]}</span>`;
+      div.addEventListener("click", () => {
+        const seekTime = timeMs / 1000 - 0.5;
+        if (currentAudio && typeof currentAudio.currentTime !== "undefined") {
+          currentAudio.currentTime = seekTime;
+        } else if (ytPlayer && typeof ytPlayer.seekTo === "function") {
+          ytPlayer.seekTo(seekTime, true);
+        }
+      });
+      lyricsList.appendChild(div);
+    });
+  }
+
+  window.updateActiveLyricInList = function (timeMs) {
+    const lines = lyricsList.querySelectorAll(".lyricLine");
+    let activeIndex = -1;
+    const track = musicTracks[currentTrackIndex];
+    if (!track || !track.lyrics) return;
+    for (let i = track.lyrics.length - 1; i >= 0; i--) {
+      if (timeMs >= track.lyrics[i][0]) {
+        activeIndex = i;
+        break;
+      }
+    }
+    lines.forEach((line, i) => {
+      line.classList.toggle("active", i === activeIndex);
+    });
+    if (activeIndex >= 0 && lyricsPanel.classList.contains("expanded")) {
+      const activeLine = lines[activeIndex];
+      if (activeLine) {
+        activeLine.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+  };
+
+  // Update dropdown text when track changes
+  window.updateMusicDropdown = function (index) {
+    if (musicTracks[index]) {
+      dropdownText.textContent = musicTracks[index].name;
+      selectedTrackIndex = index;
+      document.querySelectorAll(".dropdownOption").forEach((o, i) => {
+        o.classList.toggle("selected", i === index);
+      });
+      updateLyricsList(index);
+    }
+  };
+
+  musicStatusEl = menu.querySelector("#musicStatus");
+  musicTimeEl = menu.querySelector("#musicTime");
+  musicDurEl = menu.querySelector("#musicDur");
+  musicSeekEl = menu.querySelector("#musicSeek");
+
+  if (musicTimeEl) musicTimeEl.textContent = "00:00";
+  if (musicDurEl) musicDurEl.textContent = "00:00";
+  if (musicSeekEl) {
+    musicSeekEl.max = "0";
+    musicSeekEl.value = "0";
+    const onScrubStart = () => {
+      musicScrub = true;
+    };
+    const onScrubEnd = () => {
+      musicScrub = false;
+    };
+    musicSeekEl.addEventListener("pointerdown", onScrubStart);
+    musicSeekEl.addEventListener("pointerup", onScrubEnd);
+    musicSeekEl.addEventListener("pointercancel", onScrubEnd);
+    musicSeekEl.addEventListener("input", () => {
+      if (!currentAudio) return;
+      const v = parseFloat(musicSeekEl.value);
+      if (!Number.isFinite(v)) return;
+      currentAudio.currentTime = Math.max(0, v);
+      syncLyrics();
+    });
+  }
+
+  const playBtn = menu.querySelector("#musicPlay");
+
+  function updatePlayButton() {
+    if (!currentAudio) {
+      playBtn.textContent = "▶ Play";
+      return;
+    }
+    if (currentAudio._type === "youtube") {
+      if (
+        ytPlayer &&
+        ytPlayer.getPlayerState &&
+        ytPlayer.getPlayerState() === 1
+      ) {
+        playBtn.textContent = "⏸ Pause";
+      } else {
+        playBtn.textContent = "▶ Play";
+      }
+    } else {
+      if (currentAudio.paused) {
+        playBtn.textContent = "▶ Play";
+      } else {
+        playBtn.textContent = "⏸ Pause";
+      }
+    }
+  }
+
+  window.updatePlayButton = updatePlayButton;
+
+  playBtn.addEventListener("click", () => {
+    if (currentAudio) {
+      if (currentAudio._type === "youtube") {
+        if (ytPlayer) {
+          if (ytPlayer.getPlayerState && ytPlayer.getPlayerState() === 1) {
+            ytPlayer.pauseVideo();
+          } else {
+            ytPlayer.playVideo();
+          }
+        }
+      } else {
+        if (currentAudio.paused) {
+          currentAudio.play();
+        } else {
+          currentAudio.pause();
+        }
+      }
+      updatePlayButton();
+    } else {
+      if (musicNowPlayingEl) {
+        musicNowPlayingEl.textContent = `Now Playing: ${getTrackLabel(musicTracks[selectedTrackIndex], selectedTrackIndex)}`;
+      }
+      playMusic(selectedTrackIndex);
+    }
+  });
+  menu.querySelector("#musicStop").addEventListener("click", () => {
+    stopMusic();
+    updatePlayButton();
+  });
+  menu.querySelector("#musicAutoChat").addEventListener("change", (e) => {
+    autoChatLyrics = e.target.checked;
+  });
+
+  return menu;
+}
+
+document.addEventListener("keydown", (e) => {
+  if (isChatActive()) return;
+  if (e.key === "u" || e.key === "U") {
+    const menu = buildMusicMenu();
+    musicMenuOpen = !musicMenuOpen;
+    if (musicMenuOpen) {
+      menu.style.display = "block";
+      menu.classList.remove("hide");
+      menu.classList.add("show");
+    } else {
+      menu.classList.remove("show");
+      menu.classList.add("hide");
+      setTimeout(() => {
+        if (!musicMenuOpen) menu.style.display = "none";
+      }, 200);
+    }
+  }
+});
 let outlineColor = "#525252";
 let darkOutlineColor = "#3d3f42";
 let outlineWidth = 5.5;
@@ -10062,15 +16907,6 @@ class Items {
         scale: 160,
         range: 1400,
       },
-      {
-        indx: 1,
-        layer: 0,
-        src: "bullet_1",
-        dmg: 18,
-        speed: 3.2,
-        scale: 160,
-        range: 700
-      },
     ];
 
     this.weapons = [
@@ -10369,32 +17205,6 @@ class Items {
         hideProjectile: true,
         spdMult: 0.6,
         speed: 1500,
-      },
-      {
-        id: 16,
-        type: 1,
-        age: 10,
-        pre: 15,
-        name: "Shotgun",
-        desc: "fires multiple pellets with spread",
-        src: "shotgun_1",
-        req: ["stone", 40],
-        aboveHand: true,
-        length: 205,
-        width: 205,
-        xOff: 40,
-        yOff: 0,
-        armS: 0.65,
-        hndS: 0.35,
-        hndD: 1.8,
-        rec: 0.55,
-        projectile: 6,
-        shotgun: true,
-        pellets: 5,
-        spread: 0.28,
-        hideProjectile: true,
-        spdMult: 0.6,
-        speed: 1300,
       },
     ];
 
@@ -12403,7 +19213,7 @@ class Player {
               tmpObj[(index < 9 ? "prima" : "seconda") + "ryVariant"]
             ].val *
             (items.weapons[index].sDmg || 1);
-          if (aaa.health - valaa <= 0 && near && near.dist2 !== undefined) {
+          if (aaa.health - valaa <= 0 && near.length) {
             place(
               near.dist2 < near.scale * 1.8 + 50 ? 4 : 2,
               caf(aaa, player) + Math.PI,
@@ -12415,20 +19225,16 @@ class Player {
       if (this.gathering || this.shooting[1]) {
         if (this.gathering) {
           this.gathering = 0;
-          let gatherWeapon = items.weapons.find(w => w.id === this.gatherIndex);
-          if (gatherWeapon) {
-            this.reloads[this.gatherIndex] =
-              gatherWeapon.speed * (this.skinIndex == 20 ? 0.78 : 1);
-          }
+          this.reloads[this.gatherIndex] =
+            items.weapons[this.gatherIndex].speed *
+            (this.skinIndex == 20 ? 0.78 : 1);
           this.attacked = true;
         }
         if (this.shooting[1]) {
           this.shooting[1] = 0;
-          let shootWeapon = items.weapons.find(w => w.id === this.shootIndex);
-          if (shootWeapon) {
-            this.reloads[this.shootIndex] =
-              shootWeapon.speed * (this.skinIndex == 20 ? 0.78 : 1);
-          }
+          this.reloads[this.shootIndex] =
+            items.weapons[this.shootIndex].speed *
+            (this.skinIndex == 20 ? 0.78 : 1);
           this.attacked = true;
         }
       } else {
@@ -12440,34 +19246,9 @@ class Player {
               this.reloads[this.weaponIndex] - 110,
             );
             if (this == player) {
-              if (AB.Menu.weaponGrind && player.items.includes(22)) {
-                let gt = AB.Menu.grindTo;
-                let targetTier = gt === "Gold" ? 1 : gt === "Diamond" ? 2 : gt === "Ruby" ? 3 : gt;
-                let pTier = player.primaryVariant == undefined ? 0 : player.primaryVariant;
-                let sTier = player.secondaryVariant == undefined ? 0 : player.secondaryVariant;
-                let shouldSkip =
-                  (pTier >= targetTier && sTier >= targetTier) ||
-                  (pTier >= targetTier && player.weapons[1] != 10);
-                if (shouldSkip) {
-                  my.grindPreferred = undefined;
-                } else {
-                  checkPlace(player.getItemType(22), player.dir - Math.PI / 4);
-                  checkPlace(player.getItemType(22), player.dir + Math.PI / 4);
-                  let targetWeapon =
-                    pTier >= targetTier && player.weapons[1] != undefined
-                      ? player.weapons[1]
-                      : sTier >= targetTier && player.weapons[0] != undefined
-                        ? player.weapons[0]
-                        : player.weapons[1] == 10
-                          ? player.weapons[1]
-                          : player.weapons[0];
-                  my.grindPreferred = targetWeapon;
-                  my.grindLock = performance.now() + 250;
-                  if (player.weaponIndex != targetWeapon) {
-                    selectWeapon(targetWeapon);
-                  }
-                  sendAtck(1, player.dir);
-                  sendAtck(0, player.dir);
+              if (AB.Menu.weaponGrind) {
+                for (let i = 0; i < Math.PI * 2; i += Math.PI / 2) {
+                  checkPlace(player.getItemType(22), i);
                 }
               }
             }
@@ -12998,6 +19779,3867 @@ class WebsocketBot extends WebSocket {
   send(m) {
     return super.send(m);
   }
+}
+window.WebSocket = WebsocketBot;
+var bottics = [];
+async function botConnect(count = 1) {
+  console.log(WS);
+
+  for (let i = 0; i < count; i++) {
+    await spawnSingleBot();
+  }
+}
+
+async function spawnSingleBot() {
+  let altSolver = new AltSolver();
+  let token = await altSolver.generate();
+
+  let region = mainSocket.url.split("/")[2];
+  let actualHost = region;
+
+  if (region.includes(":")) {
+    const [regionName, code] = region.split(":");
+    actualHost = `sgs-${code.toLowerCase()}.${regionName}.moomoo.io`;
+  } else if (region === "sandbox.moomoo.io") {
+    actualHost = "sandbox.moomoo.io";
+  }
+
+  let url = `wss://${actualHost}/?token=${encodeURIComponent(token)}`;
+  console.log(`Bot connecting to: ${url}`);
+
+  let BOTSID;
+  let client = new WebSocket(url);
+  client._url = url;
+
+  let nearObjects;
+
+  let altMovement = {
+    movements: [
+      0,
+
+      Math.PI / 4,
+
+      Math.PI / 2,
+
+      (Math.PI * 3) / 4,
+
+      Math.PI,
+
+      (Math.PI * -3) / 4,
+
+      -Math.PI / 2,
+
+      -Math.PI / 4,
+    ],
+    aimToYaw: (num) => {
+      const tol = (Math.PI * 23) / 180;
+      if (Math.abs(num - 0) <= tol) {
+        return 0;
+      } else if (Math.abs(num - Math.PI / 4) <= tol) {
+        return Math.PI / 4;
+      } else if (Math.abs(num - Math.PI / 2) <= tol) {
+        return Math.PI / 2;
+      } else if (Math.abs(num - (Math.PI * 3) / 4) <= tol) {
+        return (Math.PI * 3) / 4;
+      } else if (Math.abs(Math.abs(num) - Math.PI) <= tol) {
+        return Math.PI;
+      } else if (Math.abs(num - (Math.PI * -3) / 4) <= tol) {
+        return (Math.PI * -3) / 4;
+      } else if (Math.abs(num - -Math.PI / 2) <= tol) {
+        return -Math.PI / 2;
+      } else if (Math.abs(num - -Math.PI / 4) <= tol) {
+        return -Math.PI / 4;
+      } else {
+        return null;
+      }
+    },
+  };
+
+  client.game = {
+    tick: 0,
+    tickQueue: [],
+    tickBase: function (set, tick) {
+      if (this.tickQueue[this.tick + tick]) {
+        this.tickQueue[this.tick + tick].push(set);
+      } else {
+        this.tickQueue[this.tick + tick] = [set];
+      }
+    },
+    tickRate: 1000 / config.serverUpdateRate,
+    tickSpeed: 0,
+    lastTick: performance.now(),
+  };
+
+  client.lastPos = { x: 0, y: 0 };
+  client.stuckTicks = 0;
+  client.breaking = false;
+  client.sweepDir = 1;
+  client.sweepYTarget = null;
+  client.healCooldown = 0;
+  client.ping = 0;
+  client.lastPing = -1;
+  client.firstOpen = false;
+  client.botCount;
+  client.inGame = false;
+  client.mills = {
+    active: true,
+    x: null,
+    y: null,
+    count: 0,
+  };
+  client.autoBreakToggle = true;
+  client.autoHealToggle = true;
+  client.autoPlaceToggle = true;
+  client.replacerToggle = true;
+  client.autoHatToggle = true;
+  client.reloaded = false;
+  client.hitting = false;
+  client.syncing = false;
+  client.synchit = false;
+
+  client.Bot = {};
+  let Bot = null;
+  client.players = [];
+  client.ais = [];
+  client.enemy = [];
+  client.near = {};
+  client.waitHit = 0;
+
+  client._lastMoveDir = null;
+  client._lastMoveTime = 0;
+
+  client._moveMinDelta = 0.18;
+  client._moveMinInterval = 60;
+
+  client.disconnect = function () {
+    console.log(
+      `Bot ${this.botCount} (SID: ${this.Bot?.sid}) disconnecting...`,
+    );
+
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+
+    if (this.otherIntervals) {
+      this.otherIntervals.forEach((intervalId) => {
+        clearInterval(intervalId);
+      });
+      this.otherIntervals = [];
+    }
+
+    if (this.timeouts) {
+      this.timeouts.forEach((timeoutId) => {
+        clearTimeout(timeoutId);
+      });
+      this.timeouts = [];
+    }
+
+    if (this.game) {
+      if (this.game.tickQueue) {
+        this.game.tickQueue = [];
+      }
+      if (this.game.tickBase) {
+        this.game.tickBase = () => { };
+      }
+    }
+
+    if (this.Bot) {
+      this.Bot = null;
+    }
+    if (this.near) {
+      this.near = null;
+    }
+    if (this.items) {
+      this.items = [];
+    }
+    if (this.weapons) {
+      this.weapons = [];
+    }
+
+    this.onmessage = null;
+    this.onopen = null;
+    this.onerror = null;
+    this.onclose = null;
+
+    if (this.readyState === WebSocket.OPEN) {
+      try {
+        this.close(1000, "Manual disconnect");
+      } catch (e) {
+        console.log(`Error closing bot ${this.botCount} WebSocket:`, e);
+      }
+    }
+
+    const index = bottics.indexOf(this);
+    if (index !== -1) {
+      bottics.splice(index, 1);
+    }
+
+    bottics.forEach((bot, idx) => {
+      bot.botCount = idx + 1;
+    });
+
+    console.log(`Bot ${this.botCount} disconnected`);
+    return true;
+  };
+
+  client.move = function (dir) {
+    const now = performance.now();
+
+    if (dir == null) {
+      if (client._lastMoveDir != null) {
+        client._lastMoveDir = null;
+        client._lastMoveTime = now;
+        client.sendWS("9", undefined);
+      }
+      return;
+    }
+
+    if (client._lastMoveDir == null) {
+      client._lastMoveDir = dir;
+      client._lastMoveTime = now;
+      client.sendWS("9", dir);
+      return;
+    }
+
+    const delta = Math.abs(UTILS.getAngleDist(client._lastMoveDir, dir));
+
+    if (
+      delta > client._moveMinDelta ||
+      now - client._lastMoveTime > client._moveMinInterval
+    ) {
+      client._lastMoveDir = dir;
+      client._lastMoveTime = now;
+      client.sendWS("9", dir);
+    }
+  };
+
+  client.findID = function (tmpObj, tmp) {
+    return tmpObj.find((THIS) => THIS.id == tmp);
+  };
+  client.findSID = function (tmpObj, tmp) {
+    return tmpObj.find((THIS) => THIS.sid == tmp);
+  };
+  client.findPlayerByID = function (id) {
+    return client.findID(client.players, id);
+  };
+  client.findPlayerBySID = function (sid) {
+    return client.findSID(client.players, sid);
+  };
+  client.findAIBySID = function (sid) {
+    return client.findSID(client.ais, sid);
+  };
+
+  client.selectToBuild = function (index) {
+    client.sendWS("z", index, 0);
+  };
+  client.selectWeapon = function (index, isPlace = false) {
+    if (client._reloadHolding) {
+      const lock = client._reloadLockWeapon;
+      if (isPlace) {
+        index = lock;
+      } else if (index !== lock) {
+        return;
+      }
+    }
+    if (!isPlace) Bot.weaponIndex = index;
+    client.sendWS("z", index, 1);
+  };
+  client.sendAttack = function (id, angle) {
+    client.sendWS("F", id, angle, 1);
+  };
+  client.sendAutoGather = function () {
+    client.hitting = !client.hitting;
+    client.sendWS("K", 1);
+  };
+  client.binaryType = "arraybuffer";
+  client.sendWS = function (type) {
+    if (client.readyState !== WebSocket.OPEN) return;
+    const data = Array.prototype.slice.call(arguments, 1);
+    const binary = window.msgpack.encode([type, data]);
+    if (client.nsend) client.nsend(binary);
+    else WebSocket.prototype.send.call(client, binary);
+  };
+  client.onopen = () => {
+    bottics.push(client);
+    client.botCount = bottics.length;
+    client.spawn();
+    setInterval(() => {
+      client.lastPing = Date.now();
+      client.sendWS("0");
+    }, 1000);
+  };
+  client.spawn = function () {
+    client.sendWS("M", {
+      name: AB.Menu.BotName,
+      moofoll: true,
+      skin: "6",
+    });
+    client.inGame = true;
+    if (client.Bot) {
+      client.Bot.alive = true;
+    }
+
+    client.near = null;
+    client.enemy.length = 0;
+    client.traps.inTrap = false;
+    client.traps.info = {};
+    client.traps.canSpikeTick = false;
+    client.traps.replaced = false;
+    client.traps.justOutTrap = false;
+    client.traps.currTr = null;
+    client.traps.lastBrokenObj = null;
+    client.instakill.can = false;
+    client.instakill.isTrue = false;
+    client.instakill.syncedWithMain = false;
+
+    if (!client.traps._trackingInit) {
+      client.traps.initTrapTracking();
+    }
+    client.controller = new BotController(client);
+    client.controller.start();
+    setTimeout(() => {
+      try {
+        if (!Bot || !Bot.alive) return;
+        const windmillSlot = 3;
+        const windmillId = Bot.items[windmillSlot];
+        if (windmillId == null) return;
+        const angles = client.getAngles(windmillSlot, 8);
+        if (!angles || !angles.length) return;
+        const angle = angles[0];
+        client.selectToBuild(windmillId);
+        client.sendAttack(1, angle);
+        client.sendAttack(0, angle);
+        client.selectWeapon(Bot.weaponIndex, true);
+      } catch (e) { }
+    }, 400);
+  };
+
+  var instakill = new (function () {
+    this.wait = false;
+    this.can = false;
+    this.isTrue = false;
+    this.nobull = false;
+    this.ticking = false;
+    this.canSpikeTick = false;
+    this.startTick = false;
+    this.readyTick = false;
+    this.canCounter = false;
+    this.revTick = false;
+    this.syncHit = false;
+
+    this.notif = function (title, bot) {
+      textManager.showText(bot.x2, bot.y2, 30, 0.18, 500, title, "white");
+    };
+
+    this.selectWeapon = function (weaponId, bot, client) {
+      if (bot.weaponIndex !== weaponId) {
+        client.selectWeapon(weaponId);
+      }
+    };
+
+    this.sendAttack = function (angle, client) {
+      if (angle !== undefined) {
+        client.sendWS("d", 1, angle, 1);
+      } else {
+        const dir = Math.atan2(
+          mouseY - screenHeight / 2,
+          mouseX - screenWidth / 2,
+        );
+        client.sendWS("d", 1, dir, 1);
+      }
+    };
+
+    this.normalInstakill = function (bot, client) {
+      this.notif("Range insta", bot);
+      this.isTrue = true;
+
+      this.selectWeapon(bot.weapons[1], bot, client);
+      if (
+        bot.reloads[53] == 0 &&
+        client.enemy.length &&
+        client.enemy[0].dist2 <= 700
+      ) {
+        client.buyEquip(53, 0);
+      } else {
+        client.buyEquip(20, 0);
+      }
+      client.buyEquip(11, 1);
+      const angle = client.updateDir();
+      client.sendWS("d", 1, angle, 1);
+
+      client.game.tickBase(() => {
+        client.sendWS("d", 0, 0, 1);
+        this.isTrue = false;
+      }, 1);
+    };
+
+    this.spikeTickType = function (bot, client) {
+      if (!this.spikeTickNotified) {
+        this.notif("Spike Tick", bot);
+        this.spikeTickNotified = true;
+      }
+
+      this.isTrue = true;
+      this.selectWeapon(bot.weapons[0], bot, client);
+      client.buyEquip(7, 0);
+
+      const realTimeAngle = Math.atan2(
+        client.near.y2 - bot.y2,
+        client.near.x2 - bot.x2,
+      );
+
+      client.sendWS("d", 1, realTimeAngle, 1);
+
+      client.game.tickBase(() => {
+        client.buyEquip(53, 0);
+        this.selectWeapon(bot.weapons[0], bot, client);
+        client.buyEquip(53, 0);
+        client.sendWS("d", 0, 0, 1);
+        this.isTrue = false;
+        client.buyEquip(6, 21);
+        client.buyEquip(6, 21);
+
+        setTimeout(() => {
+          this.spikeTickNotified = false;
+        }, 1000);
+      }, 3);
+    };
+  })();
+  function healthBased() {
+    if (!Bot || !Bot.maxHealth) return 1;
+    return Math.max(1, Math.floor((Bot.maxHealth - Bot.health) / 15));
+  }
+
+  client.botHealer = function () {
+    if (!Bot || !Bot.alive) return;
+    if (AB.Menu.botAutoHeal === false) return;
+    for (let i = 0; i < healthBased(); i++) {
+      client.place(0, client.updateDir());
+    }
+  };
+
+  client.handleBotDamage = function (damaged) {
+    if (client.botPlayer) client.botPlayer.handleBotDamage(damaged);
+  };
+  client.closestPossibleAngles = function (obj, id) {
+    let itemId = Bot.items[id];
+    if (itemId == undefined) return;
+    let item = items.list[itemId];
+    if (!item) return;
+
+    let objScale =
+      (obj.getScale ? obj.getScale(0.6, obj.isItem) : obj.scale) + 0.6;
+    let dx = obj.x - Bot.x2;
+    let dy = obj.y - Bot.y2;
+    let dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (
+      dist >
+      Bot.scale + objScale + 2 * item.scale + (item.placeOffset || 0)
+    ) {
+      return [UTILS.getDirion(obj.x, obj.y, Bot.x2, Bot.y2)];
+    }
+
+    let D = Bot.scale + item.scale + (item.placeOffset || 0);
+    let E = objScale + item.scale;
+    let a = (D * D - E * E + dist * dist) / (2 * dist);
+    let h = Math.sqrt(Math.max(0, D * D - a * a));
+    let px = Bot.x2 + (a / dist) * dx;
+    let py = Bot.y2 + (a / dist) * dy;
+
+    let c = {
+      x1: px + (h / dist) * dy,
+      x2: px - (h / dist) * dy,
+      y1: py - (h / dist) * dx,
+      y2: py + (h / dist) * dx,
+    };
+
+    return [
+      UTILS.getDirion(c.x1, c.y1, Bot.x2, Bot.y2),
+      UTILS.getDirion(c.x2, c.y2, Bot.x2, Bot.y2),
+    ];
+  };
+  client.checkItemLocation = function (
+    x,
+    y,
+    scale,
+    padding,
+    _angle,
+    _checkTrap,
+  ) {
+    for (const obj of gameObjects) {
+      if (!obj.active) continue;
+
+      const objScale =
+        obj.blocker ||
+        (obj.getScale ? obj.getScale(0.6, obj.isItem) : obj.scale) ||
+        0;
+
+      const dist = UTILS.getDistance(x, y, obj.x, obj.y);
+
+      const effectivePadding = scale > 30 ? padding * 0.6 : padding;
+
+      if (dist < (scale + objScale) * effectivePadding) {
+        return false;
+      }
+    }
+
+    const riverMin = config.mapScale / 2 - config.riverWidth / 2;
+    const riverMax = config.mapScale / 2 + config.riverWidth / 2;
+
+    if (scale <= 30 && y >= riverMin && y <= riverMax) {
+      return false;
+    }
+
+    return true;
+  };
+  client.checkItemLocation = function (
+    x,
+    y,
+    scale,
+    padding,
+    _angle,
+    _checkTrap,
+  ) {
+    for (const obj of gameObjects) {
+      if (!obj.active) continue;
+      const objScale =
+        obj.blocker ||
+        (obj.getScale ? obj.getScale(0.6, obj.isItem) : obj.scale) ||
+        0;
+      const dist = UTILS.getDistance(x, y, obj.x, obj.y);
+      const effPad = scale > 30 ? padding * 0.6 : padding;
+      if (dist < (scale + objScale) * effPad) return false;
+    }
+    const riverMin = config.mapScale / 2 - config.riverWidth / 2;
+    const riverMax = config.mapScale / 2 + config.riverWidth / 2;
+    if (scale <= 30 && y >= riverMin && y <= riverMax) return false;
+    return true;
+  };
+
+  client.getAngles = function (id, amount) {
+    let item = items.list[Bot.items[id]];
+    if (!item) return [];
+    let result = [];
+    let angleNeeded = Math.min(amount, 36);
+    let tmpScale = (Bot.scale || 35) + item.scale + (item.placeOffset || 0);
+    let nearObjects = gameObjects.filter(
+      (e) => e.active && UTILS.getDist(e, Bot, 0, 2) <= 400,
+    );
+    let angleStep = (Math.PI * 2) / angleNeeded;
+    let tolerance = (item.dmg ? 0.35 : 0.6) * angleStep;
+
+    for (let i = 0; i < angleNeeded; i++) {
+      let base = i * angleStep;
+      let angle = base;
+
+      for (const obj of nearObjects) {
+        let arr = client.closestPossibleAngles(obj, id);
+        if (!arr) continue;
+        let best = arr[0];
+        if (arr.length > 1) {
+          let d0 = Math.abs(UTILS.getAngleDist(base, arr[0]));
+          let d1 = Math.abs(UTILS.getAngleDist(base, arr[1]));
+          best = d1 < d0 ? arr[1] : arr[0];
+        }
+        if (Math.abs(UTILS.getAngleDist(base, best)) < tolerance) {
+          angle = best;
+          break;
+        }
+      }
+
+      let x = Bot.x2 + Math.cos(angle) * tmpScale;
+      let y = Bot.y2 + Math.sin(angle) * tmpScale;
+
+      if (client.checkItemLocation(x, y, item.scale, 0.6, angle, false)) {
+        result.push(angle);
+      }
+    }
+    return result;
+  };
+
+  client.testCanPlace = function (id, radian, _replacer, _trapData) {
+    try {
+      let idx = Bot.items[id];
+      if (idx == null) return;
+      let item = items.list[idx];
+      if (!item || item.scale == null) return;
+
+      const aim = radian || (client.near ? client.near.aim2 : 0);
+      const isSpike = !!item.dmg;
+      let placed = 0;
+
+      let angleCount;
+      if (client.near && client.near.dist2 < 200)
+        angleCount = isSpike ? 18 : 12;
+      else if (client.near && client.near.dist2 < 350)
+        angleCount = isSpike ? 15 : 10;
+      else angleCount = 8;
+
+      let angles = client.getAngles(id, angleCount);
+      if (!angles.length) return;
+
+      angles.sort(
+        (a, b) =>
+          Math.abs(UTILS.getAngleDist(aim, a)) -
+          Math.abs(UTILS.getAngleDist(aim, b)),
+      );
+
+      if (isSpike && client.near && client.near.dist2 < 300) {
+        const ea = UTILS.getDir(Bot, client.near, 2, 2);
+        angles.sort(
+          (a, b) =>
+            Math.abs(UTILS.getAngleDist(ea, a)) -
+            Math.abs(UTILS.getAngleDist(ea, b)),
+        );
+      }
+
+      const micro = isSpike ? 0.004 : 0.008;
+      const max = isSpike ? 3 : 4;
+
+      for (const base of angles) {
+        if (placed >= max) break;
+
+        if (placeAt(base)) placed++;
+
+        for (let i = 1; i <= 3 && placed < max; i++) {
+          if (placeAt(base + micro * i)) placed++;
+          if (placed >= max) break;
+          if (placeAt(base - micro * i)) placed++;
+        }
+      }
+
+      function placeAt(a) {
+        client.place(id, a);
+        return true;
+      }
+    } catch (e) { }
+  };
+
+  client.autoPush = function () {
+    if (client.botPlayer) client.botPlayer.autoPush();
+  };
+
+  const BOT_CELL_SIZE = 100;
+  const botSpatialHash = new Map();
+
+  const botHashKey = (x, y) => {
+    const cx = Math.floor(x / BOT_CELL_SIZE);
+    const cy = Math.floor(y / BOT_CELL_SIZE);
+    return `${cx},${cy}`;
+  };
+
+  const buildBotSpatialHash = (objects) => {
+    botSpatialHash.clear();
+    for (let i = 0; i < objects.length; i++) {
+      const obj = objects[i];
+      if (!obj.active) continue;
+      const scale =
+        obj.blocker ||
+        obj.scale *
+        (obj.isItem || [2, 3, 4].includes(obj.type) ? 1 : 0.6) *
+        obj.colDiv;
+      const minCx = Math.floor((obj.x - scale) / BOT_CELL_SIZE);
+      const maxCx = Math.floor((obj.x + scale) / BOT_CELL_SIZE);
+      const minCy = Math.floor((obj.y - scale) / BOT_CELL_SIZE);
+      const maxCy = Math.floor((obj.y + scale) / BOT_CELL_SIZE);
+      for (let cx = minCx; cx <= maxCx; cx++) {
+        for (let cy = minCy; cy <= maxCy; cy++) {
+          const key = `${cx},${cy}`;
+          if (!botSpatialHash.has(key)) botSpatialHash.set(key, []);
+          botSpatialHash.get(key).push({ obj, scale });
+        }
+      }
+    }
+  };
+
+  const getBotNearbyObjects = (x, y, radius) => {
+    const results = [];
+    const seen = new Set();
+    const minCx = Math.floor((x - radius) / BOT_CELL_SIZE);
+    const maxCx = Math.floor((x + radius) / BOT_CELL_SIZE);
+    const minCy = Math.floor((y - radius) / BOT_CELL_SIZE);
+    const maxCy = Math.floor((y + radius) / BOT_CELL_SIZE);
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        const key = `${cx},${cy}`;
+        const cell = botSpatialHash.get(key);
+        if (cell) {
+          for (let i = 0; i < cell.length; i++) {
+            const entry = cell[i];
+            if (!seen.has(entry.obj.sid)) {
+              seen.add(entry.obj.sid);
+              results.push(entry);
+            }
+          }
+        }
+      }
+    }
+    return results;
+  };
+
+  const generateBotAngles = (enemyDir, trapInfo, inTrap, _count = 12) => {
+    const angles = [];
+    const step = Math.PI / 12;
+
+    if (inTrap && trapInfo && trapInfo.x !== undefined) {
+      const trapAngle = Math.atan2(trapInfo.y - Bot.y2, trapInfo.x - Bot.x2);
+      for (let i = -4; i <= 4; i++) {
+        angles.push(trapAngle + i * step);
+      }
+      angles.push(enemyDir);
+      angles.push(enemyDir - step);
+      angles.push(enemyDir + step);
+    } else {
+      for (let i = -6; i <= 6; i++) {
+        angles.push(enemyDir + i * step);
+      }
+    }
+
+    const behind = enemyDir + Math.PI;
+    return angles.filter((a) => {
+      const diff = Math.abs(UTILS.getAngleDist(a, behind));
+      return diff > Math.PI / 3;
+    });
+  };
+
+  const scoreBotAngle = (
+    angle,
+    px,
+    py,
+    placeRadius,
+    itemScale,
+    enemyDir,
+    trapInfo,
+    inTrap,
+  ) => {
+    const x = px + placeRadius * Math.cos(angle);
+    const y = py + placeRadius * Math.sin(angle);
+    let score = 0;
+
+    if (!client.near) return { angle, x, y, score: -1000 };
+
+    const ex = client.near.x2;
+    const ey = client.near.y2;
+    const distToEnemy = Math.sqrt((x - ex) ** 2 + (y - ey) ** 2);
+
+    const angleDiffFromEnemy = Math.abs(UTILS.getAngleDist(angle, enemyDir));
+    score += (Math.PI - angleDiffFromEnemy) * 30;
+
+    if (distToEnemy < 150) score += 50;
+    else if (distToEnemy < 250) score += 30;
+    else if (distToEnemy > 400) score -= 40;
+
+    if (inTrap && trapInfo && trapInfo.x !== undefined) {
+      const distToTrap = Math.sqrt(
+        (x - trapInfo.x) ** 2 + (y - trapInfo.y) ** 2,
+      );
+      const trapScale = trapInfo.getScale ? trapInfo.getScale() : 35;
+      if (distToTrap < trapScale + itemScale + 50) {
+        score += 80;
+      }
+      const trapAngle = Math.atan2(trapInfo.y - Bot.y2, trapInfo.x - Bot.x2);
+      const trapAngleDiff = Math.abs(UTILS.getAngleDist(angle, trapAngle));
+      if (trapAngleDiff < Math.PI / 4) score += 40;
+    }
+
+    const enemyMoveDir = client.near.moveDir ?? client.near.dir;
+    if (enemyMoveDir !== undefined) {
+      const predictX = ex + Math.cos(enemyMoveDir) * 50;
+      const predictY = ey + Math.sin(enemyMoveDir) * 50;
+      const distToPredict = Math.sqrt(
+        (x - predictX) ** 2 + (y - predictY) ** 2,
+      );
+      if (distToPredict < 120) score += 35;
+    }
+
+    const enemyToBot = Math.atan2(Bot.y2 - ey, Bot.x2 - ex);
+    const enemyToPlace = Math.atan2(y - ey, x - ex);
+    const blockDiff = Math.abs(UTILS.getAngleDist(enemyToBot, enemyToPlace));
+    if (blockDiff < Math.PI / 4) score += 45;
+
+    const behind = enemyDir + Math.PI;
+    const behindDiff = Math.abs(UTILS.getAngleDist(angle, behind));
+    if (behindDiff < Math.PI / 3) score -= 200;
+
+    return { angle, x, y, score };
+  };
+
+  const fastBotCheckCollision = (x, y, itemScale, ignoreSid) => {
+    const nearby = getBotNearbyObjects(x, y, itemScale + 100);
+    for (const { obj, scale } of nearby) {
+      if (obj.sid === ignoreSid) continue;
+      const dx = x - obj.x;
+      const dy = y - obj.y;
+      const minDist = itemScale + scale;
+      if (dx * dx + dy * dy < minDist * minDist) return false;
+    }
+    return true;
+  };
+
+  client.traps = {
+    inTrap: false,
+    info: {},
+    canSpikeTick: false,
+    replaced: false,
+    justOutTrap: false,
+    currTr: null,
+    _outTrapTimer: null,
+    lastBrokenObj: null,
+    _spikeTickActive: false,
+
+    getRiverBounds: function () {
+      return {
+        min: config.mapScale / 2 - config.riverWidth / 2,
+        max: config.mapScale / 2 + config.riverWidth / 2,
+      };
+    },
+
+    inRiver: function (y) {
+      const river = this.getRiverBounds();
+      return y >= river.min && y <= river.max;
+    },
+
+    getObjScale: function (obj) {
+      if (!obj) return 0;
+      return (
+        obj.blocker ||
+        obj.scale *
+        (obj.isItem || [2, 3, 4].includes(obj.type) ? 1 : 0.6) *
+        obj.colDiv
+      );
+    },
+
+    canPlaceAt: function (x, y, itemScale, ignoreSid) {
+      const river = this.getRiverBounds();
+      if (y >= river.min && y <= river.max) return false;
+
+      if (
+        !objectManager.checkItemLocation(
+          x,
+          y,
+          itemScale,
+          0.6,
+          0,
+          false,
+          Bot,
+          ignoreSid,
+        )
+      ) {
+        return false;
+      }
+
+      for (let i = 0; i < liztobj.length; i++) {
+        const obj = liztobj[i];
+        if (!obj.active || obj.sid === ignoreSid) continue;
+
+        const objScale = this.getObjScale(obj);
+        const dx = x - obj.x;
+        const dy = y - obj.y;
+        const minDist = itemScale + objScale;
+
+        if (dx * dx + dy * dy < minDist * minDist) {
+          return false;
+        }
+      }
+
+      return true;
+    },
+
+    getAngles: function (id, amount, priorityAngle = null) {
+      let item = items.list[Bot.items[id]];
+      if (!item) return [];
+      let tmpScale = Bot.scale + item.scale + (item.placeOffset || 0);
+      let minAngleDiff = (2 * item.scale) / tmpScale;
+      const PI2 = Math.PI * 2;
+
+      let myObjects = gameObjects.filter(
+        (e) =>
+          e.active &&
+          e.isTeamObject(Bot) &&
+          UTILS.getDist(e, Bot, 0, 2) <= tmpScale + 50,
+      );
+
+      const hasObjectAt = (angle) => {
+        let x = Bot.x2 + Math.cos(angle) * tmpScale;
+        let y = Bot.y2 + Math.sin(angle) * tmpScale;
+        for (let obj of myObjects) {
+          let s = obj.getScale ? obj.getScale() : obj.scale || 35;
+          let dx = x - obj.x,
+            dy = y - obj.y;
+          if (dx * dx + dy * dy < (item.scale + s) * (item.scale + s))
+            return true;
+        }
+        return false;
+      };
+
+      let result = [];
+      for (let i = 0; i < amount; i++) {
+        let base = i * (PI2 / amount);
+        if (hasObjectAt(base)) continue;
+        let x = Bot.x2 + Math.cos(base) * tmpScale;
+        let y = Bot.y2 + Math.sin(base) * tmpScale;
+        if (
+          !objectManager.checkItemLocation(x, y, item.scale, 0.6, base, false)
+        )
+          continue;
+        if (
+          !result.some(
+            (r) => Math.abs(UTILS.getAngleDist(r, base)) < minAngleDiff,
+          )
+        )
+          result.push(base);
+      }
+
+      if (priorityAngle !== null) {
+        result.sort(
+          (a, b) =>
+            Math.abs(UTILS.getAngleDist(a, priorityAngle)) -
+            Math.abs(UTILS.getAngleDist(b, priorityAngle)),
+        );
+      }
+      return result;
+    },
+
+    tryPlace: function (id, angles, max = 2, extraCheck = null) {
+      const item = items.list[Bot.items[id]];
+      if (!item) return 0;
+      let placed = 0;
+      for (const a of angles) {
+        if (placed >= max) break;
+        if (extraCheck && !extraCheck(a)) continue;
+        client.place(id, a);
+        placed++;
+      }
+      return placed;
+    },
+
+    testCanPlace: function (
+      id,
+      first,
+      repeat,
+      plus,
+      radian,
+      replacer,
+      maxPlace = 4,
+    ) {
+      if (client.botInTrap && !replacer) return 0;
+      let item = items.list[Bot.items[id]];
+      if (!item) return 0;
+      let tmpS = Bot.scale + item.scale + (item.placeOffset || 0);
+      let tmpObjects = [];
+      const river = this.getRiverBounds();
+
+      liztobj.forEach((p) => {
+        if (!p.active) return;
+        tmpObjects.push({
+          x: p.x,
+          y: p.y,
+          blocker: p.blocker,
+          scale: p.scale,
+          isItem: p.isItem,
+          type: p.type,
+          colDiv: p.colDiv,
+          getScale: function (sM = 1, ig) {
+            return (
+              this.scale *
+              (this.isItem || [2, 3, 4].includes(this.type) ? 1 : 0.6 * sM) *
+              (ig ? 1 : this.colDiv)
+            );
+          },
+        });
+      });
+
+      let placedCount = 0;
+      for (let i = first; i < repeat && placedCount < maxPlace; i += plus) {
+        let relAim = radian + i;
+        let tmpX = Bot.x2 + tmpS * Math.cos(relAim);
+        let tmpY = Bot.y2 + tmpS * Math.sin(relAim);
+
+        let cantPlace = tmpObjects.find(
+          (tmp) =>
+            UTILS.getDistance(tmpX, tmpY, tmp.x, tmp.y) <
+            item.scale +
+            (tmp.blocker ? tmp.blocker : tmp.getScale(0.6, tmp.isItem)),
+        );
+        if (cantPlace) continue;
+
+        if (item.id !== 18 && tmpY >= river.min && tmpY <= river.max) continue;
+
+        client.place(id, relAim);
+        placedCount++;
+
+        tmpObjects.push({
+          x: tmpX,
+          y: tmpY,
+          blocker: item.blocker,
+          scale: item.scale,
+          isItem: true,
+          type: null,
+          colDiv: item.colDiv,
+          getScale: function () {
+            return this.scale;
+          },
+        });
+      }
+
+      if (
+        placedCount > 0 &&
+        replacer &&
+        item.dmg &&
+        client.near &&
+        client.near.dist2 <=
+        items.weapons[Bot.weapons[0]].range + Bot.scale * 1.8
+      ) {
+        this.canSpikeTick = true;
+      }
+      return placedCount;
+    },
+
+    testCanPlaceOnEnemy: function (id, maxPlace = 2) {
+      if (!client.near) return 0;
+      let item = items.list[Bot.items[id]];
+      if (!item) return 0;
+
+      let tmpS = Bot.scale + item.scale + (item.placeOffset || 0);
+      let placedCount = 0;
+      const river = this.getRiverBounds();
+
+      let predX = client.near.x2;
+      let predY = client.near.y2;
+      if (client.near.xVel !== undefined && client.near.yVel !== undefined) {
+        let speed = Math.sqrt(
+          client.near.xVel * client.near.xVel +
+          client.near.yVel * client.near.yVel,
+        );
+        if (speed > 0.5) {
+          predX = client.near.x2 + client.near.xVel * 2;
+          predY = client.near.y2 + client.near.yVel * 2;
+        }
+      }
+
+      let angleToEnemy = Math.atan2(predY - Bot.y2, predX - Bot.x2);
+      let angles = [
+        angleToEnemy,
+        angleToEnemy + Math.PI / 12,
+        angleToEnemy - Math.PI / 12,
+        angleToEnemy + Math.PI / 6,
+        angleToEnemy - Math.PI / 6,
+      ];
+
+      if (client.near.xVel !== undefined && client.near.yVel !== undefined) {
+        let speed = Math.sqrt(
+          client.near.xVel * client.near.xVel +
+          client.near.yVel * client.near.yVel,
+        );
+        if (speed > 0.5) {
+          let blockAngle =
+            Math.atan2(client.near.yVel, client.near.xVel) + Math.PI;
+          angles.unshift(
+            blockAngle,
+            blockAngle + Math.PI / 10,
+            blockAngle - Math.PI / 10,
+          );
+        }
+      }
+
+      let tmpObjects = [];
+      liztobj.forEach((p) => {
+        if (!p.active) return;
+        tmpObjects.push({
+          x: p.x,
+          y: p.y,
+          blocker: p.blocker,
+          scale: p.scale,
+          isItem: p.isItem,
+          getScale: function (sM = 1, ig) {
+            return (
+              this.scale *
+              (this.isItem ? 1 : 0.6 * sM) *
+              (ig ? 1 : this.colDiv || 1)
+            );
+          },
+        });
+      });
+
+      for (let angle of angles) {
+        if (placedCount >= maxPlace) break;
+
+        let tmpX = Bot.x2 + tmpS * Math.cos(angle);
+        let tmpY = Bot.y2 + tmpS * Math.sin(angle);
+
+        let distToEnemy = UTILS.getDistance(tmpX, tmpY, predX, predY);
+        if (distToEnemy > client.near.scale + item.scale + 80) continue;
+
+        let cantPlace = tmpObjects.find(
+          (tmp) =>
+            UTILS.getDistance(tmpX, tmpY, tmp.x, tmp.y) <
+            item.scale +
+            (tmp.blocker ? tmp.blocker : tmp.getScale(0.6, tmp.isItem)),
+        );
+        if (cantPlace) continue;
+
+        if (item.id !== 18 && tmpY >= river.min && tmpY <= river.max) continue;
+
+        client.place(id, angle);
+        placedCount++;
+
+        tmpObjects.push({
+          x: tmpX,
+          y: tmpY,
+          blocker: item.blocker,
+          scale: item.scale,
+          isItem: true,
+          getScale: function () {
+            return this.scale;
+          },
+        });
+      }
+
+      if (placedCount > 0) {
+        this.canSpikeTick = true;
+      }
+
+      return placedCount;
+    },
+
+    testCanPlaceAroundTrap: function (
+      id,
+      trap,
+      _enemyDir,
+      enemyMoveDir,
+      maxPlace = 3,
+    ) {
+      let item = items.list[Bot.items[id]];
+      if (!item) return 0;
+
+      let placedCount = 0;
+      let tmpS = Bot.scale + item.scale + (item.placeOffset || 0);
+      let playerToTrap = Math.atan2(trap.y - Bot.y2, trap.x - Bot.x2);
+      let trapScale = trap.getScale ? trap.getScale() : trap.scale || 35;
+      let maxDistFromTrap = trapScale + item.scale + 60;
+      const river = this.getRiverBounds();
+
+      let angles = [];
+
+      if (enemyMoveDir !== null) {
+        let blockAngle = enemyMoveDir + Math.PI;
+        angles.push(
+          blockAngle,
+          blockAngle + Math.PI / 8,
+          blockAngle - Math.PI / 8,
+        );
+      }
+
+      for (let i = 0; i < 12; i++) {
+        angles.push(playerToTrap + (i * Math.PI) / 6);
+      }
+
+      let tmpObjects = [];
+      liztobj.forEach((p) => {
+        if (!p.active) return;
+        tmpObjects.push({
+          x: p.x,
+          y: p.y,
+          blocker: p.blocker,
+          scale: p.scale,
+          isItem: p.isItem,
+          getScale: function (sM = 1, ig) {
+            return (
+              this.scale *
+              (this.isItem ? 1 : 0.6 * sM) *
+              (ig ? 1 : this.colDiv || 1)
+            );
+          },
+        });
+      });
+
+      for (let angle of angles) {
+        if (placedCount >= maxPlace) break;
+
+        let tmpX = Bot.x2 + tmpS * Math.cos(angle);
+        let tmpY = Bot.y2 + tmpS * Math.sin(angle);
+
+        let distFromTrap = UTILS.getDistance(tmpX, tmpY, trap.x, trap.y);
+        if (distFromTrap > maxDistFromTrap) continue;
+
+        let cantPlace = tmpObjects.find(
+          (tmp) =>
+            UTILS.getDistance(tmpX, tmpY, tmp.x, tmp.y) <
+            item.scale +
+            (tmp.blocker ? tmp.blocker : tmp.getScale(0.6, tmp.isItem)),
+        );
+        if (cantPlace) continue;
+
+        if (item.id !== 18 && tmpY >= river.min && tmpY <= river.max) continue;
+
+        client.place(id, angle);
+        placedCount++;
+
+        tmpObjects.push({
+          x: tmpX,
+          y: tmpY,
+          blocker: item.blocker,
+          scale: item.scale,
+          isItem: true,
+          getScale: function () {
+            return this.scale;
+          },
+        });
+      }
+
+      return placedCount;
+    },
+
+    checkSpikeTick: function () {
+      let e = client.near;
+      if (!e || ![3, 4, 5].includes(e.primaryIndex)) return false;
+      if (e.reloads && e.reloads[e.primaryIndex] > client.game.tickRate)
+        return false;
+
+      let wep = items.weapons[Bot.weapons[0]];
+      if (!wep) return false;
+
+      let eWep = items.weapons[e.primaryIndex || 5];
+      if (e.dist2 > eWep.range + e.scale * 1.8) return false;
+      if (e.dist2 > wep.range + Bot.scale + e.scale) return false;
+
+      let spike = items.list[Bot.items[2]];
+      if (!spike) return false;
+
+      let kb = wep.knock || 0;
+      let kbDist = kb * 130;
+      let kbDir = Math.atan2(e.y2 - Bot.y2, e.x2 - Bot.x2);
+
+      let bx = e.x2,
+        by = e.y2;
+      if (e.xVel !== undefined && e.yVel !== undefined) {
+        let spd = Math.sqrt(e.xVel * e.xVel + e.yVel * e.yVel);
+        if (spd > 0.5) {
+          bx += e.xVel * 1.5;
+          by += e.yVel * 1.5;
+        }
+      }
+
+      let kx = bx + Math.cos(kbDir) * kbDist;
+      let ky = by + Math.sin(kbDir) * kbDist;
+      let tmpS = Bot.scale + spike.scale + (spike.placeOffset || 0);
+      let aKB = Math.atan2(ky - Bot.y2, kx - Bot.x2);
+      let aE = Math.atan2(by - Bot.y2, bx - Bot.x2);
+
+      let angles = [aE, aE + 0.15, aE - 0.15];
+      if (kb > 0) {
+        angles.unshift(aKB, aKB + 0.1, aKB - 0.1);
+      }
+
+      const river = this.getRiverBounds();
+      let effR = e.scale + spike.scale + (kb > 0 ? kbDist * 0.5 : 40);
+      let hitR = e.scale + spike.scale + 15;
+
+      for (let a of angles) {
+        let tx = Bot.x2 + tmpS * Math.cos(a);
+        let ty = Bot.y2 + tmpS * Math.sin(a);
+        let dKB = UTILS.getDistance(tx, ty, kx, ky);
+        let dE = UTILS.getDistance(tx, ty, bx, by);
+
+        if (dKB > effR && dE > effR) continue;
+        if (ty >= river.min && ty <= river.max) continue;
+        if (!this.canPlaceAt(tx, ty, spike.scale, null)) continue;
+
+        if (dKB <= hitR || dE <= hitR) {
+          this.canSpikeTick = true;
+          return true;
+        }
+      }
+      return false;
+    },
+
+    protect: function () {
+      if (!Bot || !Bot.alive || !client.near) return;
+      this.testCanPlace(
+        2,
+        0,
+        Math.PI * 2,
+        Math.PI / 18,
+        client.near.aim2,
+        false,
+        3,
+      );
+    },
+
+    AntiTrap: function (id, x, y) {
+      if (!Bot || !Bot.alive) return;
+      if (!Bot.items[2]) return;
+      if (id !== 15 || Math.hypot(y - Bot.y2, x - Bot.x2) > 80) return;
+
+      this.tryPlace(2, this.getAngles(2, 16), 4);
+    },
+
+    initTrapTracking: function () {
+      if (this._trackingInit) return;
+      this._trackingInit = true;
+      const self = this;
+
+      setInterval(() => {
+        if (!Bot || !Bot.alive || !client.inGame) return;
+
+        let inEnemyTrap = gameObjects.some(
+          (t) =>
+            t.trap &&
+            t.active &&
+            !t.isTeamObject(Bot) &&
+            UTILS.getDist(t, Bot, 0, 2) <= t.getScale() + Bot.scale,
+        );
+
+        if (!inEnemyTrap && self.currTr) {
+          self.justOutTrap = true;
+          clearTimeout(self._outTrapTimer);
+          self._outTrapTimer = setTimeout(
+            () => (self.justOutTrap = false),
+            120,
+          );
+        }
+        self.currTr = inEnemyTrap;
+      }, 16);
+    },
+
+    smartSpikePlacement: function (targetX, targetY, count = 4) {
+      if (!Bot.items[2]) return 0;
+      const item = items.list[Bot.items[2]];
+      if (!item) return 0;
+
+      const tmpS = Bot.scale + item.scale + (item.placeOffset || 0);
+      const targetAngle = Math.atan2(targetY - Bot.y2, targetX - Bot.x2);
+
+      let placed = 0;
+      for (let i = 0; i < count; i++) {
+        const angle = targetAngle + (i - count / 2) * (Math.PI / 8);
+        const x = Bot.x2 + tmpS * Math.cos(angle);
+        const y = Bot.y2 + tmpS * Math.sin(angle);
+
+        if (fastBotCheckCollision(x, y, item.scale, null)) {
+          if (
+            objectManager.checkItemLocation(
+              x,
+              y,
+              item.scale,
+              0.6,
+              item.id,
+              false,
+              Bot,
+            )
+          ) {
+            client.place(2, angle);
+            placed++;
+          }
+        }
+      }
+      return placed;
+    },
+  };
+
+  client.instakill = {
+    wait: false,
+    can: false,
+    isTrue: false,
+    ticking: false,
+    canSpikeTick: false,
+    syncedWithMain: false,
+
+    checkCanInsta: function () {
+      let totally = 0;
+      if (Bot.alive && client.inGame && client.near) {
+        let primary = {
+          weapon: Bot.weapons[0],
+          dmg:
+            Bot.weapons[0] !== undefined
+              ? items.weapons[Bot.weapons[0]].dmg
+              : 0,
+        };
+        let secondary = {
+          weapon: Bot.weapons[1],
+          dmg:
+            Bot.weapons[1] !== undefined
+              ? items.weapons[Bot.weapons[1]].Pdmg
+              : 0,
+        };
+
+        let bull = Bot.skins && Bot.skins[7] ? 1.5 : 1;
+        let pV =
+          primary.variant !== undefined
+            ? config.weaponVariants[primary.variant].val
+            : 1;
+
+        if (primary.weapon !== undefined && Bot.reloads[primary.weapon] === 0) {
+          totally += primary.dmg * pV * bull;
+        }
+        if (
+          secondary.weapon !== undefined &&
+          Bot.reloads[secondary.weapon] === 0
+        ) {
+          totally += secondary.dmg;
+        }
+        if (
+          Bot.skins &&
+          Bot.skins[53] &&
+          Bot.reloads[53] <=
+          (Bot.weapons[1] === 10 ? 0 : client.game.tickRate) &&
+          client.near.skinIndex !== 22
+        ) {
+          totally += 25;
+        }
+        totally *= client.near.skinIndex === 6 ? 0.75 : 1;
+      }
+      return totally;
+    },
+
+    executeInsta: function () {
+      if (!this.can || this.isTrue) return;
+      this.isTrue = true;
+      this.performInsta("normal");
+    },
+
+    performInsta: function (type = "normal") {
+      if (this.isTrue) return;
+
+      this.isTrue = true;
+      this.syncedWithMain = true;
+
+      if (type === "rev") {
+        this.performRevInsta();
+      } else if (type === "nobull") {
+        this.performNoBullInsta();
+      } else {
+        this.performNormalInsta();
+      }
+    },
+
+    performNormalInsta: function () {
+      client.selectWeapon(Bot.weapons[0]);
+      client.buyEquip(7, 21);
+      client.sendAutoGather();
+
+      setTimeout(() => {
+        client.selectWeapon(Bot.weapons[1]);
+        client.buyEquip(Bot.reloads[53] === 0 ? 53 : 6, 0);
+        setTimeout(() => {
+          client.sendAutoGather();
+          this.resetState();
+        }, 200);
+      }, 100);
+    },
+
+    performNoBullInsta: function () {
+      client.selectWeapon(Bot.weapons[0]);
+      client.buyEquip(7, 21);
+      client.sendAutoGather();
+
+      setTimeout(() => {
+        client.selectWeapon(Bot.weapons[1]);
+        client.buyEquip(Bot.reloads[53] === 0 ? 53 : 6, 0);
+        setTimeout(() => {
+          client.sendAutoGather();
+          this.resetState();
+        }, 200);
+      }, 100);
+    },
+
+    performRevInsta: function () {
+      client.buyEquip(53, 0);
+      client.selectWeapon(Bot.weapons[1]);
+      client.sendAutoGather();
+
+      setTimeout(() => {
+        client.selectWeapon(Bot.weapons[0]);
+        client.buyEquip(7, 0);
+        setTimeout(() => {
+          client.sendAutoGather();
+          this.resetState();
+        }, 200);
+      }, 100);
+    },
+
+    resetState: function () {
+      this.isTrue = false;
+      this.can = false;
+      this.syncedWithMain = false;
+    },
+  };
+
+  client.autoPlace = function () {
+    if (client.botPlayer) client.botPlayer.autoPlace();
+  };
+
+  client.replacer = function (findObj) {
+    if (client.botPlayer) client.botPlayer.replacer(findObj);
+  };
+
+  client.cleanupEnemyData = function () {
+    if (!Bot || !Bot.alive) {
+      client.near = null;
+      client.enemy.length = 0;
+      client.traps.inTrap = false;
+      client.traps.info = {};
+      client.traps.canSpikeTick = false;
+      client.traps.replaced = false;
+      client.instakill.can = false;
+      client.instakill.isTrue = false;
+      return;
+    }
+
+    if (client.near) {
+      let enemyStillValid = client.enemy.some(
+        (e) =>
+          e.sid === client.near.sid &&
+          e.alive &&
+          e.visible &&
+          e.health > 0 &&
+          e.dist2 <= 1200,
+      );
+
+      if (!enemyStillValid) {
+        client.near = null;
+        client.traps.canSpikeTick = false;
+        client.instakill.can = false;
+      }
+    }
+
+    client.enemy = client.enemy.filter(
+      (e) => e && e.alive && e.visible && e.health > 0,
+    );
+
+    if (client.enemy.length === 0) {
+      client.near = null;
+      client.traps.inTrap = false;
+      client.traps.canSpikeTick = false;
+      client.instakill.can = false;
+    }
+  };
+
+  client.botAutoHeal = function () {
+    if (client.botPlayer) client.botPlayer.botAutoHeal();
+  };
+
+  client.botAutoBuy = function () {
+    if (!Bot || !Bot.alive) return;
+    if (AB.Menu.botAutoUpgrade === false) return;
+
+    if (Bot.points >= 100 && !Bot.skins[40]) {
+      client.sendWS("c", 1, 40, 0);
+    }
+    if (Bot.points >= 300 && !Bot.skins[6]) {
+      client.sendWS("c", 1, 6, 0);
+    }
+  };
+
+  client.botAutoPush = function () {
+    if (!client.near) return;
+
+    let nearTrap = gameObjects
+      .filter(
+        (tmp) =>
+          tmp.trap &&
+          tmp.active &&
+          tmp.isTeamObject(Bot) &&
+          UTILS.getDist(tmp, client.near, 0, 2) <=
+          client.near.scale + tmp.getScale() + 5,
+      )
+      .sort(function (a, b) {
+        return (
+          UTILS.getDist(a, client.near, 0, 2) -
+          UTILS.getDist(b, client.near, 0, 2)
+        );
+      })[0];
+
+    if (nearTrap) {
+      let spike = gameObjects
+        .filter(
+          (tmp) =>
+            (tmp.dmg ||
+              (tmp.type == 1 &&
+                tmp.y >= config.mapScale - config.snowBiomeTop)) &&
+            tmp.active &&
+            !tmp.isTeamObject(client.near) &&
+            UTILS.getDist(tmp, nearTrap, 0, 0) <=
+            client.near.scale + nearTrap.scale + tmp.scale,
+        )
+        .sort(function (a, b) {
+          return (
+            UTILS.getDist(a, client.near, 0, 2) -
+            UTILS.getDist(b, client.near, 0, 2)
+          );
+        })[0];
+
+      if (spike) {
+        let pushAngle = Math.atan2(
+          client.near.y2 - spike.y,
+          client.near.x2 - spike.x,
+        );
+
+        let point = {
+          x: client.near.x2 + Math.cos(pushAngle) * 30,
+          y: client.near.y2 + Math.sin(pushAngle) * 60,
+        };
+
+        let dir = Math.atan2(point.y - Bot.y2, point.x - Bot.x2);
+
+        client.sendWS("9", dir, 1);
+      }
+    }
+  };
+
+  client.replacer = function (findObj) {
+    if (!client.enemy.length || !client.near) return;
+    if (client.near.dist2 > 600) return;
+
+    if (!findObj || !client.near) return;
+
+    const objDist = UTILS.getDist(findObj, Bot, 0, 2);
+    if (objDist > 350) return;
+
+    const enemyToObjDist = UTILS.getDist(findObj, client.near, 0, 2);
+    if (enemyToObjDist > 400) return;
+
+    const enemyAngle = UTILS.getDir(client.near, Bot, 2, 2);
+
+    if (findObj && findObj.health < 280) {
+      const spikePriorities = [9, 8, 7, 6];
+      let spikeSlot = -1;
+
+      for (const itemID of spikePriorities) {
+        spikeSlot = Bot.items.findIndex((slotID) => slotID === itemID);
+        if (spikeSlot !== -1) break;
+      }
+
+      if (spikeSlot !== -1 && client.near.dist2 <= 350) {
+        const item = items.list[Bot.items[spikeSlot]];
+        const tmpS = findObj.scale + item.scale + (item.placeOffset || 0);
+        const angleStep = Math.PI / 16;
+        let placedCount = 0;
+        const maxPlace = 2;
+
+        for (let i = 0; i < 32 && placedCount < maxPlace; i++) {
+          const testAngle = i * angleStep;
+          const tmpX = findObj.x + tmpS * Math.cos(testAngle);
+          const tmpY = findObj.y + tmpS * Math.sin(testAngle);
+
+          const angleToEnemy = Math.abs(
+            UTILS.getAngleDist(enemyAngle, testAngle),
+          );
+          const goodForEnemy = angleToEnemy < Math.PI / 2;
+
+          if (
+            goodForEnemy &&
+            objectManager.checkItemLocation(
+              tmpX,
+              tmpY,
+              item.scale,
+              0.6,
+              item.id,
+              false,
+              Bot,
+            )
+          ) {
+            let canPlace = true;
+            gameObjects.forEach((tmp) => {
+              if (
+                tmp.active &&
+                UTILS.getDistance(tmpX, tmpY, tmp.x, tmp.y) <
+                item.scale +
+                (tmp.blocker ? tmp.blocker : tmp.getScale(0.6, tmp.isItem))
+              ) {
+                canPlace = false;
+              }
+            });
+
+            if (canPlace) {
+              client.place(spikeSlot, testAngle);
+              placedCount++;
+            }
+          }
+        }
+
+        if (client.near.dist2 <= 180 && instakill) {
+          instakill.canSpikeTick = true;
+          setTimeout(() => {
+            if (instakill.canSpikeTick) {
+              instakill.spikeTickType(Bot, client);
+              instakill.canSpikeTick = false;
+            }
+          }, 0);
+        }
+        return;
+      }
+    }
+
+    if (objDist <= 300 && client.near.dist2 <= 450) {
+      const weaponRange =
+        items.weapons[client.near.primaryIndex || 5]?.range || 0;
+      const canEnemyHit =
+        enemyToObjDist <= weaponRange + client.near.scale * 1.8;
+
+      if (canEnemyHit) {
+        const trapPriorities = [15, 12, 11, 10];
+        let trapSlot = -1;
+
+        for (const itemID of trapPriorities) {
+          trapSlot = Bot.items.findIndex((slotID) => slotID === itemID);
+          if (trapSlot !== -1) break;
+        }
+
+        if (trapSlot !== -1) {
+          const item = items.list[Bot.items[trapSlot]];
+          const tmpS = findObj.scale + item.scale + (item.placeOffset || 0);
+          const angleStep = Math.PI / 12;
+          let placedCount = 0;
+          const maxPlace = 1;
+
+          for (let i = 0; i < 24 && placedCount < maxPlace; i++) {
+            const testAngle = enemyAngle + i * angleStep - Math.PI;
+            const tmpX = findObj.x + tmpS * Math.cos(testAngle);
+            const tmpY = findObj.y + tmpS * Math.sin(testAngle);
+
+            if (
+              objectManager.checkItemLocation(
+                tmpX,
+                tmpY,
+                item.scale,
+                0.6,
+                item.id,
+                false,
+                Bot,
+              )
+            ) {
+              let canPlace = true;
+              gameObjects.forEach((tmp) => {
+                if (
+                  tmp.active &&
+                  UTILS.getDistance(tmpX, tmpY, tmp.x, tmp.y) <
+                  item.scale +
+                  (tmp.blocker
+                    ? tmp.blocker
+                    : tmp.getScale(0.6, tmp.isItem))
+                ) {
+                  canPlace = false;
+                }
+              });
+
+              if (canPlace) {
+                client.place(trapSlot, testAngle);
+                placedCount++;
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  client.AutoBuy = class {
+    constructor(items) {
+      this.items = items;
+    }
+    buyNext() {
+      for (const [id, type] of this.items) {
+        const find = type == 0 ? findID(hats, id) : findID(accessories, id);
+        const isOwned = type == 0 ? Bot.skins[id] : Bot.tails[id];
+        if (!find || isOwned) continue;
+        if (Bot.points >= find.price) {
+          client.sendWS("c", 1, id, type);
+          return;
+        }
+        return;
+      }
+    }
+  };
+  client.autoBuy = new client.AutoBuy([
+    [11, 1],
+    [40, 0],
+    [6, 0],
+    [7, 0],
+    [31, 0],
+    [15, 0],
+    [19, 1],
+    [22, 0],
+    [53, 0],
+    [12, 0],
+    [20, 0],
+    [10, 0],
+    [56, 0],
+    [21, 1],
+    [11, 0],
+    [26, 0],
+    [18, 1],
+    [13, 1],
+  ]);
+  client.buyEquip = function (hatId, tailId, disableMonkeyTail = false) {
+    if (!Bot.alive) return;
+
+    const equip = (id, index) => {
+      const equipped =
+        index === 0 ? Bot.skinIndex === id : Bot.tailIndex === id;
+      const owned = index === 0 ? !!Bot.skins[id] : !!Bot.tails[id];
+
+      if (equipped) return;
+
+      if (owned) {
+        client.sendWS("c", 0, id, index);
+        return;
+      }
+
+      const itemList = index === 0 ? hats : accessories;
+      const find = findID(itemList, id);
+      if (find && Bot.points >= find.price) {
+        client.sendWS("c", 1, id, index);
+        client.sendWS("c", 0, id, index);
+        return;
+      }
+
+      const fallbackId = index === 0 ? (Bot.skins[6] ? 6 : 0) : 0;
+      const zeroEquipped =
+        index === 0
+          ? Bot.skinIndex === fallbackId
+          : Bot.tailIndex === fallbackId;
+      if (!zeroEquipped) {
+        client.sendWS("c", 0, fallbackId, index);
+      }
+    };
+
+    if (tailId === 0 || tailId === 1) {
+      equip(hatId, tailId);
+      return;
+    }
+
+    equip(hatId, 0);
+    equip(!disableMonkeyTail ? tailId : 0, 1);
+  };
+  client.hatChanger = function () {
+    if (client.botPlayer) client.botPlayer.hatChanger();
+  };
+  client.place = function (id, angle) {
+    try {
+      let item = items.list[Bot.items[id]];
+      if (!item) return;
+      if (
+        Bot.itemCounts[item.group.id] == undefined
+          ? true
+          : Bot.itemCounts[item.group.id] <
+          (config.isSandbox
+            ? id === 3 || id === 5
+              ? 299
+              : 99
+            : item.group.limit
+              ? item.group.limit
+              : 99)
+      ) {
+        client.sendWS("D", angle);
+        client.sendWS("z", Bot.items[id]);
+        client.sendWS("F", 1, angle, 1);
+        client.sendWS("F", 0, angle, 1);
+        client.selectWeapon(Bot.weaponIndex, true);
+      }
+    } catch (e) { }
+  };
+  client.autoMill = function () {
+    if (client.breaking) return;
+    if (!configs.botMills) return;
+
+    const baseDir = UTILS.getDir(Bot.oldPos || Bot, Bot, 2, 2);
+    const spread = 1.4;
+    const angles = [-spread, 0, spread];
+
+    for (let i = 0; i < angles.length; i++) {
+      client.place(3, baseDir + angles[i]);
+    }
+  };
+  client.optimisingAutoReloadFunction = function (weaponIndex) {
+    return Bot.reloads[weaponIndex] > 0;
+  };
+  client.optimisingAutoReloadFunction_2 = function (weaponIndex) {
+    return Bot.weaponIndex != weaponIndex || Bot.buildIndex > -1;
+  };
+
+  client.followPlayer = function () {
+    if (!player || !Bot || !Bot.alive) return undefined;
+
+    const SAFE_DIST = 100;
+    const MIN_DIST = 100;
+    const MAX_DIST = 100;
+
+    const dx = player.x2 - Bot.x2;
+    const dy = player.y2 - Bot.y2;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist < MIN_DIST) {
+      return Math.atan2(-dy, -dx);
+    }
+
+    if (dist > MAX_DIST) {
+      return Math.atan2(dy, dx);
+    }
+  };
+
+  client.isInRiver = function () {
+    if (!Bot) return false;
+    const riverMin = config.mapScale / 2 - config.riverWidth / 2;
+    const riverMax = config.mapScale / 2 + config.riverWidth / 2;
+    return Bot.y2 >= riverMin && Bot.y2 <= riverMax;
+  };
+
+  client.updateMoveDir = function (debug) {
+    if (debug) return debug;
+    if (!client.Bot || !client.Bot.alive) return undefined;
+    const Bot = client.Bot;
+
+    if (client.near) {
+      let nearTraps = gameObjects
+        .filter(
+          (tmp) =>
+            tmp.trap &&
+            tmp.active &&
+            tmp.isTeamObject(Bot) &&
+            UTILS.getDist(tmp, client.near, 0, 2) <=
+            client.near.scale + tmp.getScale() + 100,
+        )
+        .sort(function (a, b) {
+          return (
+            UTILS.getDist(a, client.near, 0, 2) -
+            UTILS.getDist(b, client.near, 0, 2)
+          );
+        });
+
+      if (nearTraps.length > 0) {
+        nearTraps.forEach((trap) => {
+          if (trap.health < 150 && trap.health > 0) {
+            const predictedBreakTime = trap.health / 15;
+            setTimeout(() => {
+              if (trap.health <= 0 && client.near) {
+                const retrapAngle = Math.atan2(
+                  client.near.y2 - Bot.y2,
+                  client.near.x2 - Bot.x2,
+                );
+                const retrapDistance = client.near.scale + 60;
+
+                const retrapX =
+                  client.near.x2 + Math.cos(retrapAngle) * retrapDistance;
+                const retrapY =
+                  client.near.y2 + Math.sin(retrapAngle) * retrapDistance;
+
+                const moveDir = Math.atan2(retrapY - Bot.y2, retrapX - Bot.x2);
+                Bot.moveDir = moveDir;
+
+                setTimeout(() => {
+                  const distToRetrapPos = Math.sqrt(
+                    Math.pow(Bot.x2 - retrapX, 2) +
+                    Math.pow(Bot.y2 - retrapY, 2),
+                  );
+
+                  if (distToRetrapPos <= 50 && Bot.items && Bot.items[4]) {
+                    const placeAngle = Math.atan2(
+                      client.near.y2 - Bot.y2,
+                      client.near.x2 - Bot.x2,
+                    );
+                    textManager.showText(
+                      Bot.x2,
+                      Bot.y2,
+                      30,
+                      0.18,
+                      500,
+                      "bot-retrap",
+                      "#ff00ff",
+                    );
+                  }
+                }, 200);
+              }
+            }, predictedBreakTime * 50);
+          }
+        });
+
+        for (let i = 0; i < nearTraps.length; i++) {
+          let currentTrap = nearTraps[i];
+
+          let spikes = gameObjects
+            .filter(
+              (tmp) =>
+                (tmp.dmg ||
+                  (tmp.type == 1 &&
+                    tmp.y >= config.mapScale - config.snowBiomeTop)) &&
+                tmp.active &&
+                !tmp.isTeamObject(client.near) &&
+                UTILS.getDist(tmp, currentTrap, 0, 0) <=
+                client.near.scale + currentTrap.scale + tmp.scale + 20,
+            )
+            .sort(function (a, b) {
+              return (
+                UTILS.getDist(a, client.near, 0, 2) -
+                UTILS.getDist(b, client.near, 0, 2)
+              );
+            });
+
+          if (spikes.length > 0) {
+            let spike = spikes[0];
+            let pushAngle = Math.atan2(
+              client.near.y2 - spike.y,
+              client.near.x2 - spike.x,
+            );
+
+            let targetTrap = null;
+            for (let j = i + 1; j < nearTraps.length; j++) {
+              let nextTrap = nearTraps[j];
+              let trapToTrapDist = UTILS.getDist(currentTrap, nextTrap, 0, 0);
+
+              if (trapToTrapDist <= 250) {
+                let angleToNextTrap = Math.atan2(
+                  nextTrap.y - currentTrap.y,
+                  nextTrap.x - currentTrap.x,
+                );
+
+                let spikeToNextTrapAngle = Math.atan2(
+                  nextTrap.y - spike.y,
+                  nextTrap.x - spike.x,
+                );
+
+                let angleDiff = Math.abs(
+                  UTILS.getAngleDist(pushAngle, spikeToNextTrapAngle),
+                );
+
+                if (angleDiff < Math.PI / 2) {
+                  targetTrap = nextTrap;
+                  break;
+                }
+              }
+            }
+
+            let point;
+            if (targetTrap) {
+              let chainAngle = Math.atan2(
+                targetTrap.y - spike.y,
+                targetTrap.x - spike.x,
+              );
+              point = {
+                x: spike.x + Math.cos(chainAngle) * 60,
+                y: spike.y + Math.sin(chainAngle) * 60,
+              };
+            } else {
+              point = {
+                x: client.near.x2 + Math.cos(pushAngle) * 30,
+                y: client.near.y2 + Math.sin(pushAngle) * 60,
+              };
+            }
+
+            let dir = Math.atan2(point.y - Bot.y2, point.x - Bot.x2);
+
+            Bot.moveDir = dir;
+            return Bot.moveDir;
+          }
+        }
+      }
+    }
+
+    if (client.synchit && client.syncMoveDir != null) return client.syncMoveDir;
+    const px = Bot.x2;
+    const py = Bot.y2;
+    const lastX = client.lastPos?.x ?? px;
+    const lastY = client.lastPos?.y ?? py;
+    const moveDist = Math.hypot(px - lastX, py - lastY);
+    client.lastPos = { x: px, y: py };
+    const speedMult = Bot.spdMult || 1;
+    if (moveDist < Math.max(1.5, 2.2 * speedMult)) client.stuckTicks++;
+    else client.stuckTicks = 0;
+    if (client.breaking && Bot.moveDir !== undefined) {
+      return Bot.moveDir;
+    }
+    const riverMin = config.mapScale / 2 - config.riverWidth / 2;
+    const riverMax = config.mapScale / 2 + config.riverWidth / 2;
+    const inRiver = py >= riverMin && py <= riverMax;
+    let targetX, targetY;
+    const moveMode = AB.Menu.botAutoMoveMode || "follow";
+
+    if (moveMode === "mouse") {
+      const m = mouseWorldPos();
+      targetX = m.x;
+      targetY = m.y;
+    } else if (moveMode === "circle") {
+      let i = bottics.indexOf(client);
+      let n = bottics.length;
+      let ang = (2 * Math.PI * i) / n + Date.now() / 3000;
+      let rad = 200;
+      targetX = player.x2 + rad * Math.cos(ang);
+      targetY = player.y2 + rad * Math.sin(ang);
+    } else if (
+      moveMode === "random" ||
+      (configs.botMills && !inRiver && (!player || !player.alive))
+    ) {
+      if (!Bot.moveDir || client.stuckTicks > 6) {
+        Bot.moveDir = Math.random() * Math.PI * 2 - Math.PI;
+        client.stuckTicks = 0;
+      }
+
+      const avoidObj = gameObjects.find((obj) => {
+        if (!obj.active || obj.ignoreCollision) return false;
+        if (typeof obj.isTeamObject === "function" && obj.isTeamObject(Bot))
+          return false;
+        const d = UTILS.getDist(obj, Bot, 0, 2);
+        return d > 0 && d < 180;
+      });
+      if (avoidObj) {
+        const objAngle = Math.atan2(avoidObj.y - py, avoidObj.x - px);
+        const diff = UTILS.getAngleDist(Bot.moveDir, objAngle);
+        Bot.moveDir += diff >= 0 ? -0.6 : 0.6;
+      }
+
+      const wanderDist = Math.max(110, 150 * speedMult);
+      targetX = px + Math.cos(Bot.moveDir) * wanderDist;
+      targetY = py + Math.sin(Bot.moveDir) * wanderDist;
+    } else if (moveMode === "away" && client.near) {
+      const enemy = client.near;
+      const dxe = enemy.x2 - px;
+      const dye = enemy.y2 - py;
+      targetX = px - dxe * 2;
+      targetY = py - dye * 2;
+    } else if (moveMode === "towards" && client.near) {
+      const enemy = client.near;
+      targetX = enemy.x2;
+      targetY = enemy.y2;
+    } else {
+      const dxp = player.x2 - px;
+      const dyp = player.y2 - py;
+      const distp = Math.hypot(dxp, dyp);
+      const minDist = 70 * speedMult;
+      const maxDist = 140 * speedMult;
+      if (distp > minDist && distp < maxDist) {
+        Bot.moveDir = undefined;
+        return undefined;
+      }
+      if (distp <= minDist) {
+        targetX = player.x2 - dxp * 2;
+        targetY = player.y2 - dyp * 2;
+      } else {
+        targetX = player.x2;
+        targetY = player.y2;
+      }
+    }
+    if (typeof targetX !== "number" || typeof targetY !== "number") {
+      Bot.moveDir = undefined;
+      return undefined;
+    }
+    const borderDir = client.isAtBorder();
+    if (borderDir !== undefined) {
+      Bot.moveDir = borderDir;
+      return Bot.moveDir;
+    }
+    const dx = targetX - px;
+    const dy = targetY - py;
+    const desiredDir = Math.atan2(dy, dx);
+    const botR = (Bot.scale || 35) + 12;
+    const stepDist = Math.max(45, 70 * speedMult);
+    const nearObjs = gameObjects.filter((obj) => {
+      if (!obj.active || obj.ignoreCollision) return false;
+      const dxo = obj.x - px;
+      const dyo = obj.y - py;
+      return Math.hypot(dxo, dyo) <= 240;
+    });
+    function distToSegment(px, py, ax, ay, bx, by) {
+      const vx = bx - ax;
+      const vy = by - ay;
+      const wx = px - ax;
+      const wy = py - ay;
+      const c1 = vx * wx + vy * wy;
+      if (c1 <= 0) return Math.hypot(px - ax, py - ay);
+      const c2 = vx * vx + vy * vy;
+      if (c2 <= c1) return Math.hypot(px - bx, py - by);
+      const t = c1 / c2;
+      const hx = ax + t * vx;
+      const hy = ay + t * vy;
+      return Math.hypot(px - hx, py - hy);
+    }
+    function score(angle) {
+      const nx = px + Math.cos(angle) * stepDist;
+      const ny = py + Math.sin(angle) * stepDist;
+      let cost = Math.hypot(targetX - nx, targetY - ny);
+      let penalty = 0;
+      for (const obj of nearObjs) {
+        const objR =
+          (obj.getScale ? obj.getScale(0.6, obj.isItem) : obj.scale) || 50;
+        const d = distToSegment(obj.x, obj.y, px, py, nx, ny);
+        if (d < objR + botR) {
+          penalty += 200 + (objR + botR - d) * 60;
+        }
+      }
+      if (client.stuckTicks > 6) {
+        penalty += Math.abs(UTILS.getAngleDist(desiredDir, angle)) * 80;
+      }
+      return cost + penalty;
+    }
+    const step = Math.PI / 8;
+    const spread = client.stuckTicks > 6 ? 5 : 3;
+    let best = desiredDir;
+    let bestScore = Infinity;
+    for (let i = -spread; i <= spread; i++) {
+      const a = desiredDir + i * step;
+      const s = score(a);
+      if (s < bestScore) {
+        bestScore = s;
+        best = a;
+      }
+    }
+    if (bestScore > 800 && client.stuckTicks > 8) {
+      best = desiredDir + Math.PI;
+    }
+    Bot.moveDir = best;
+    return Bot.moveDir;
+  };
+
+  client.isAtBorder = function () {
+    const BORDER = 14700;
+    const SAFE = 500;
+
+    if (!Bot) return undefined;
+
+    const x = Bot.x2;
+    const y = Bot.y2;
+
+    if (x >= BORDER) return Math.PI;
+    if (x <= SAFE) return 0;
+    if (y >= BORDER) return -Math.PI / 2;
+    if (y <= SAFE) return Math.PI / 2;
+
+    return undefined;
+  };
+
+  client.breakObstacles = function () {
+    if (!Bot || !Bot.alive) return false;
+
+    const px = Bot.x2;
+    const py = Bot.y2;
+    const breakableTypes = [2, 3];
+
+    for (let i = 0; i < gameObjects.length; i++) {
+      const o = gameObjects[i];
+      if (!o.active || o.ignoreCollision) continue;
+      if (!o.owner) continue;
+      if (!breakableTypes.includes(o.itemID)) continue;
+
+      const dx = o.x - px;
+      const dy = o.y - py;
+      const dist = Math.hypot(dx, dy);
+
+      const objR = (o.getScale ? o.getScale(0.6, o.isItem) : o.scale) || 50;
+      const minDist = objR + Bot.scale + 15;
+
+      if (dist < minDist) {
+        if (!client.breaking) {
+          client.breaking = true;
+        }
+
+        const breakAngle = client.updateDir();
+        if (breakAngle !== undefined) {
+          client.selectWeapon(Bot.weapons[0]);
+          client.buyEquip(40, 19);
+          client.sendWS("d", 1, breakAngle, 1);
+          Bot.moveDir = breakAngle;
+          return true;
+        }
+
+        return true;
+      }
+    }
+
+    client.breaking = false;
+    return false;
+  };
+
+  client.lastDir = 0;
+  client.lastSpin = Date.now();
+  client.plusDir = 0;
+
+  client.smoothTransition = function (targetDir) {
+    const smoothingFactor = 0.1;
+    return (1 - smoothingFactor) * client.lastDir + smoothingFactor * targetDir;
+  };
+
+  client.getSafeDir = function () {
+    if (!Bot || !Bot.alive) return 0;
+
+    const m =
+      typeof mouseWorldPos === "function" ? mouseWorldPos() : mouseWorldPos;
+    if (m && typeof m.x === "number" && typeof m.y === "number") {
+      return Math.atan2(m.y - Bot.y2, m.x - Bot.x2);
+    }
+
+    if (player && player.alive) {
+      return UTILS.getDir(player, Bot, 0, 2);
+    }
+
+    return client.lastDir || 0;
+  };
+
+  client.getBestTargetDirion = function () {
+    if (client.enemy.length && client.near && client.near.aim2 !== undefined) {
+      return client.near.aim2;
+    }
+    return client.getSafeDir();
+  };
+
+  client.updateDir = function (debug) {
+    if (debug != null) return debug;
+
+    if (!Bot || !Bot.alive) {
+      return 0;
+    }
+
+    const now = Date.now();
+
+    if (
+      now - client.lastSpin >= 235 &&
+      !client.syncing &&
+      !client.synchit &&
+      !instakill.isTrue
+    ) {
+      client.plusDir += Math.random() * (Math.PI * 2);
+      client.lastSpin = now;
+    }
+
+    if (client.breaking) {
+      for (const obj of gameObjects) {
+        if (!obj.active || obj.ignoreCollision) continue;
+        const dx = obj.x - Bot.x2;
+        const dy = obj.y - Bot.y2;
+        if (Math.abs(dx) > 180 || Math.abs(dy) > 180) continue;
+
+        const objR =
+          (obj.getScale ? obj.getScale(0.6, obj.isItem) : obj.scale) || 50;
+        const minDist = objR + Bot.scale + 15;
+        if (Math.hypot(dx, dy) < minDist) {
+          client.lastDir = Math.atan2(dy, dx);
+          return client.lastDir;
+        }
+      }
+    }
+
+    const primaryWeapon = Bot.weapons[0];
+    const secondaryWeapon = Bot.weapons[1];
+    const primaryReload = Bot.reloads ? Bot.reloads[primaryWeapon] : 0;
+    const secondaryReload = Bot.reloads ? Bot.reloads[secondaryWeapon] || 0 : 0;
+
+    const primaryInRange =
+      client.near &&
+      client.near.dist2 !== undefined &&
+      items.weapons[primaryWeapon] &&
+      client.near.dist2 <=
+      items.weapons[primaryWeapon].range + (client.near.scale || 35) * 1.8;
+
+    if (client.botInTrap && client.botTrapObj) {
+      client.lastDir = Math.atan2(
+        client.botTrapObj.y - Bot.y2,
+        client.botTrapObj.x - Bot.x2,
+      );
+      client.lastDir = client.smoothTransition(client.lastDir);
+      return client.lastDir;
+    }
+
+    if (
+      client.syncing ||
+      client.synchit ||
+      instakill.isTrue ||
+      (primaryInRange && primaryReload === 0)
+    ) {
+      client.lastDir = client.getBestTargetDirion();
+    } else if (
+      secondaryWeapon &&
+      secondaryReload === 0 &&
+      client.enemy.length
+    ) {
+      client.lastDir = client.getSafeDir();
+    } else if (client.enemy.length && client.near) {
+      client.lastDir = client.getBestTargetDirion();
+    } else {
+      client.lastDir = client.getSafeDir();
+    }
+
+    client.lastDir = client.smoothTransition(client.lastDir);
+
+    return client.lastDir;
+  };
+
+  client.syncHit = function () {
+    if (!Bot || !Bot.alive) {
+      client.synchit = false;
+      return;
+    }
+
+    if (!client.enemy.length) {
+      client.synchit = false;
+      return;
+    }
+
+    client.synchit = true;
+
+    const target = client.near;
+
+    const primaryWeapon = Bot.weapons[0];
+
+    if (Bot.reloads[primaryWeapon] > 0) {
+      client.synchit = false;
+      return;
+    }
+
+    if (Bot.weaponIndex !== primaryWeapon || Bot.buildIndex > -1) {
+      client.selectWeapon(primaryWeapon);
+    }
+
+    client.buyEquip(53, 0);
+
+    setTimeout(() => {
+      client.buyEquip(7, 21);
+
+      const angle = client.updateDir();
+
+      client.sendWS("d", 1, angle, 1);
+    }, 160);
+
+    client.game.tickBase(() => { }, 30);
+    client.synchit = false;
+    client.sendWS("d", 1, undefined, 1);
+  };
+  client.sync = function () {
+    if (!Bot || !Bot.alive) {
+      client.syncing = false;
+      return;
+    }
+    if (!client.enemy.length || !client.near) {
+      client.syncing = false;
+      return;
+    }
+    const secondaryWeapon = Bot.weapons[1];
+    if (secondaryWeapon === undefined) {
+      client.syncing = false;
+      return;
+    }
+    if (Bot.reloads[secondaryWeapon] > 0) {
+      client.syncing = false;
+      return;
+    }
+    client.syncing = true;
+    if (Bot.weaponIndex !== secondaryWeapon || Bot.buildIndex > -1) {
+      client.selectWeapon(secondaryWeapon);
+    }
+    const angle = client.updateDir();
+    client.sendWS("D", angle);
+    client.sendWS("d", 1, angle, 1);
+    client.game.tickBase(() => { }, 30);
+    client.syncing = false;
+    client.sendWS("d", 1, undefined, 1);
+  };
+
+  client.autoBreak = function () {
+    if (!Bot || !Bot.alive || !client.botInTrap) return;
+
+    const trap = client.botTrapObj;
+    if (!trap) return;
+
+    const angle = Math.atan2(trap.y - Bot.y2, trap.x - Bot.x2);
+
+    client.sendWS("D", angle);
+
+    const surroundedBySpike = gameObjects.find(
+      (e) =>
+        /spikes/.test(e.name) &&
+        e.owner.sid !== Bot.sid &&
+        UTILS.getDistance(e.x, e.y, Bot.x2, Bot.y2) < 200 &&
+        e.active,
+    );
+
+    const turretFinder = gameObjects.find(
+      (e) =>
+        /turret/.test(e.name) &&
+        e.owner.sid !== Bot.sid &&
+        UTILS.getDistance(e.x, e.y, Bot.x2, Bot.y2) < 700 &&
+        e.active,
+    );
+
+    const smartVal = (id) =>
+      !Bot.skins[40]
+        ? 6
+        : id === 1
+          ? 40
+          : surroundedBySpike && trap.health > 100
+            ? 26
+            : Bot.shameCount >= 3
+              ? 7
+              : turretFinder
+                ? 22
+                : 6;
+
+    const isSec = Bot.weapons[1] === 10;
+    const hp = trap.health;
+
+    if (Bot.buildIndex >= 0) {
+      const weapon = isSec ? Bot.weapons[1] : Bot.weapons[0];
+      client.selectWeapon(weapon);
+    }
+
+    if (
+      Bot.weaponIndex !== (isSec ? Bot.weapons[1] : Bot.weapons[0]) &&
+      (!isSec || hp > 20)
+    ) {
+      const weapon = isSec ? Bot.weapons[1] : Bot.weapons[0];
+      client.selectWeapon(weapon);
+    }
+
+    if (isSec && hp <= 20 && Bot.reloads[Bot.weapons[0]] === 0) {
+      client.selectWeapon(Bot.weapons[0]);
+    }
+
+    const gearID = smartVal(isSec ? (hp <= 20 ? 1 : 2) : 1);
+    client.buyEquip(gearID, 0);
+    client.buyEquip(surroundedBySpike ? 21 : 19, 1);
+
+    client.sendWS("d", 1, angle, 1);
+
+    client.game.tickBase(() => {
+      const newAngle = Math.atan2(trap.y - Bot.y2, trap.x - Bot.x2);
+      client.sendWS("D", newAngle);
+      client.sendWS("d", 1, newAngle, 1);
+    }, 1);
+  };
+  class BotController {
+    constructor(client) {
+      this.client = client;
+      this.running = false;
+      this.interval = null;
+      this.minPeriod = 60;
+      this.lastRun = 0;
+    }
+    start() {
+      if (this.running) return;
+      this.running = true;
+      this.interval = setInterval(() => this.update(), this.minPeriod);
+    }
+    stop() {
+      if (!this.running) return;
+      clearInterval(this.interval);
+      this.interval = null;
+      this.running = false;
+    }
+    enabled(flag, def = true) {
+      const v = AB?.Menu?.[flag];
+      return v === undefined ? def : v !== false;
+    }
+    update() {
+      const c = this.client;
+      const Bot = c.Bot;
+      if (!c.inGame || !Bot || !Bot.alive) return;
+      const now = performance.now();
+      if (now - this.lastRun < this.minPeriod) return;
+      this.lastRun = now;
+      if (!c.botPlayer) c.botPlayer = new BotPlayer(c);
+      c.botPlayer.update({
+        movement: this.enabled("BotMovement", true),
+        autoHeal: this.enabled("BotAutoHeal", true),
+        autoBreak: this.enabled("BotAutoBreak", true),
+        autoPlace: this.enabled("BotAutoPlace", true),
+        autoPush: this.enabled("BotAutoPush", true),
+        replacer: this.enabled("BotReplacer", true),
+        autoHat: this.enabled("BotAutoHat", true),
+        antiInsta: this.enabled("BotAntiInsta", true),
+      });
+    }
+  }
+  class BotPlayer {
+    constructor(client) {
+      this.client = client;
+    }
+    update(flags) {
+      const c = this.client;
+      const Bot = c.Bot;
+      if (!c.inGame || !Bot || !Bot.alive) return;
+      this.manageReload();
+      if (flags.movement) {
+        const dir = c.updateMoveDir();
+        if (dir !== undefined) c.move(dir);
+      }
+      if (flags.autoHeal) this.botAutoHeal();
+      if (flags.autoBreak && typeof c.autoBreak === "function") c.autoBreak();
+      if (flags.autoPlace) this.autoPlace();
+      if (flags.autoPush) this.autoPush();
+      if (flags.replacer && c.near) {
+        const trapObj = gameObjects
+          .filter((tmp) => tmp.trap && tmp.active && tmp.isTeamObject(Bot))
+          .sort((a, b) => UTILS.getDist(a, c.near, 0, 2) - UTILS.getDist(b, c.near, 0, 2))[0];
+        if (trapObj) this.replacer(trapObj);
+      }
+      if (flags.autoHat) this.hatChanger();
+      if (flags.antiInsta) this.antiInsta();
+    }
+    handleBotDamage(damaged) {
+      const c = this.client, Bot = c.Bot;
+      if (!Bot || !Bot.alive) return;
+      let autoheal = false;
+      let antiinsta = configs.antiInsta, antiinsta1 = configs.antiInsta, antiinsta4 = configs.antiInsta;
+      if (AB.Menu.botAutoHat !== false) {
+        if (Bot.shameCount > 0 && !c.botBullTick) {
+          c.botBullTick = Math.min(Bot.shameCount, 6) * 2 + 1;
+          c.buyEquip(7, 0);
+        } else if (Bot.shameCount === 0 && Bot.lastshamecount > 0 && !c.botBullTick) {
+          c.buyEquip(6, 0);
+        }
+      }
+      let attackers = c.getAttacker ? c.getAttacker(damaged) : [];
+      let gearDmgs = [0.25, 0.45].map((val) => val * (items.weapons[Bot.weapons[0]]?.dmg || 0));
+      let includeSpikeDmgs =
+        c.near && c.near.length
+          ? !c.botBullTick &&
+          gearDmgs.includes(damaged) &&
+          c.near[0].skinIndex == 11 &&
+          c.near[0].tailIndex == 21
+          : false;
+      let healTimeout = 140 - window.ping;
+      if (damaged >= 0 && damaged <= 66 && Bot.shameCount === 4 && Bot.primaryIndex !== "4") {
+        autoheal = configs.autoHeal;
+        antiinsta = false;
+        antiinsta1 = false;
+        antiinsta4 = false;
+      } else {
+        if (Bot.shameCount !== 4) {
+          autoheal = false;
+          antiinsta = configs.antiInsta;
+          antiinsta4 = configs.antiInsta;
+        }
+      }
+      if (damaged <= 66 && Bot.shameCount === 3 && Bot.primaryIndex !== "4") {
+        antiinsta = false;
+      } else {
+        if (Bot.shameCount !== 3) antiinsta = configs.antiInsta;
+      }
+      if (damaged <= 66 && Bot.shameCount === 4 && Bot.primaryIndex !== "4") {
+        antiinsta1 = true;
+      } else {
+        if (Bot.shameCount !== 4) antiinsta1 = false;
+      }
+      if (damaged >= 0 && damaged <= 90 && Bot.shameCount === 2) {
+        antiinsta4 = false;
+      } else {
+        if (Bot.shameCount !== 3) antiinsta4 = configs.antiInsta;
+      }
+      if (damaged >= 0 && damaged <= 90 && !antiinsta) {
+        if (Bot.shameCount === 3) antiinsta1 = true;
+        else antiinsta1 = false;
+      }
+      const enemy = c.near;
+      if (configs.autoHeal && damaged <= 66 && Bot.skinIndex != 6 && enemy?.weaponIndex === 4) {
+        c.game.tickBase(() => {
+          c.botHealer?.();
+        }, 2);
+      }
+      if (
+        damaged >= (includeSpikeDmgs ? 8 : 20) &&
+        Bot.damageThreat >= 20 &&
+        antiinsta4 &&
+        c.game.tick - (Bot.antiTimer || 0) > 1
+      ) {
+        if (Bot.reloads[53] == 0 && Bot.reloads[Bot.weapons[1]] == 0) {
+          Bot.canEmpAnti = true;
+        } else {
+          Bot.soldierAnti = true;
+        }
+        Bot.antiTimer = c.game.tick;
+        if (configs.autoHeal) {
+          let shame = Bot.weapons[0] == 4 ? 2 : 5;
+          if (Bot.shameCount < shame) {
+            c.botHealer?.();
+          } else {
+            c.game.tickBase(() => {
+              c.botHealer?.();
+            }, 2);
+          }
+          if (damaged >= (includeSpikeDmgs ? 8 : 20) && Bot.damageThreat >= 20 && autoheal) {
+            setTimeout(() => c.botHealer?.(), 120);
+          }
+        }
+      } else if (configs.autoHeal) {
+        c.game.tickBase(() => {
+          c.botHealer?.();
+        }, 2);
+      }
+      if (damaged >= 20 && Bot.skinIndex == 11 && Bot.shameCount <= 3) {
+        c.instakill && (c.instakill.canCounter = true);
+      }
+    }
+    manageReload() {
+      const c = this.client, Bot = c.Bot;
+      if (!Bot || !Bot.alive || !Bot.weapons) return;
+      const p = Bot.weapons[0];
+      const s = Bot.weapons[1];
+      const r0 = p !== undefined ? (Bot.reloads?.[p] || 0) : 0;
+      const r1 = s !== undefined ? (Bot.reloads?.[s] || 0) : 0;
+      if (r0 > 0 || r1 > 0) {
+        c._reloadHolding = true;
+        let lock = c._reloadLockWeapon;
+        if (r0 > 0 && r1 > 0) {
+          lock =
+            Bot.weaponIndex === p ? p :
+              Bot.weaponIndex === s ? s :
+                (p !== undefined ? p : s);
+        } else {
+          lock = r0 > 0 ? p : s;
+        }
+        if (lock !== undefined) {
+          c._reloadLockWeapon = lock;
+          if (Bot.weaponIndex !== lock || Bot.buildIndex > -1) {
+            c.selectWeapon(lock);
+          }
+        }
+      } else {
+        if (c._reloadHolding) {
+          c._reloadHolding = false;
+          c._reloadLockWeapon = undefined;
+          if (p !== undefined && s !== undefined) {
+            const fast =
+              (items.weapons[p]?.spdMult || 0) < (items.weapons[s]?.spdMult || 0) ? s : p;
+            if (Bot.weaponIndex !== fast || Bot.buildIndex > -1) c.selectWeapon(fast);
+          }
+        }
+      }
+    }
+    antiInsta() {
+      const c = this.client, Bot = c.Bot;
+      if (!c.near || !Bot || !Bot.alive) return;
+      const threat = c.instakill && typeof c.instakill.checkCanInsta === "function"
+        ? c.instakill.checkCanInsta()
+        : 0;
+      const spikeTick = c.traps && typeof c.traps.checkSpikeTick === "function"
+        ? c.traps.checkSpikeTick()
+        : false;
+      if (spikeTick || threat >= (Bot.health || 0)) {
+        if (c.traps && typeof c.traps.protect === "function") c.traps.protect();
+        const hat = spikeTick ? 22 : 6;
+        c.buyEquip(hat, 0);
+        const dir = typeof c.getSafeDir === "function" ? c.getSafeDir() : Math.atan2(Bot.y2 - c.near.y2, Bot.x2 - c.near.x2);
+        c.sendWS("9", dir, 1);
+      }
+    }
+    autoPlace() {
+      const c = this.client, Bot = c.Bot;
+      if (!c.enemy.length || !configs.AutoPlace || c.instakill.ticking || !c.near) return;
+      if (c.traps.inTrap) return;
+      const tickInterval = Math.max(1, AB.Menu.autoPlaceTick || 1);
+      if (c.game.tick % tickInterval !== 0) return;
+      const PI = Math.PI, PI2 = PI * 2;
+      if (gameObjects.length) {
+        let near2 = { inTrap: false };
+        let nearTrap = gameObjects
+          .filter(
+            (e) =>
+              e.trap &&
+              e.active &&
+              e.isTeamObject(Bot) &&
+              UTILS.getDist(e, c.near, 0, 2) <= c.near.scale + e.getScale() + 5,
+          )
+          .sort((a, b) => UTILS.getDist(a, c.near, 0, 2) - UTILS.getDist(b, c.near, 0, 2))[0];
+        if (nearTrap) near2.inTrap = true;
+        if (c.near.dist3 <= 450) {
+          if (c.near.dist3 <= 200) {
+            c.traps.testCanPlace(4, 0, PI2, PI / 24, c.near.aim2, 0, { inTrap: near2.inTrap });
+          } else {
+            Bot.items[4] === 15 &&
+              c.traps.testCanPlace(4, 0, PI2, PI / 24, c.near.aim2);
+          }
+        }
+      } else {
+        if (c.near.dist3 <= 450) {
+          Bot.items[4] === 15 &&
+            c.traps.testCanPlace(4, 0, PI2, PI / 24, c.near.aim2);
+        }
+      }
+    }
+    replacer(findObj) {
+      const c = this.client, Bot = c.Bot;
+      if (!findObj || !c.near || !Bot || !Bot.alive) return;
+      const objDist = UTILS.getDist(findObj, Bot, 0, 2);
+      const objAim = UTILS.getDir(findObj, Bot, 0, 2);
+      const isEnemyTrap = findObj.trap && !findObj.isTeamObject(Bot);
+      if (isEnemyTrap && c.traps.justOutTrap) {
+        c.traps.lastBrokenObj = findObj;
+        if (Bot.y2 >= config.mapScale - config.snowBiomeTop) c.buyEquip(22, 0);
+        else c.buyEquip(6, 0);
+        c.traps.testCanPlaceOnEnemy(2);
+        return;
+      }
+      if (objDist <= 300 && c.near && c.near.dist2 <= 400) {
+        const danger = c.traps.checkSpikeTick();
+        const useTraps = danger && Bot.items[4] === 15 && c.near.dist2 > 200;
+        if (useTraps) {
+          c.traps.testCanPlace(4, 0, Math.PI * 2, Math.PI / 18, objAim, true);
+        } else {
+          c.traps.testCanPlaceOnEnemy(2);
+        }
+        c.traps.replaced = true;
+      }
+    }
+    botAutoHeal() {
+      const c = this.client, Bot = c.Bot;
+      if (!Bot || !Bot.alive) return;
+      if (AB.Menu.botAutoHeal === false) return;
+      const health = Bot.health, maxHealth = 100;
+      const threshold = (AB.Menu.botAutoHealThreshold || 40) / 100;
+      if (health < maxHealth * threshold && Bot.items[0]) {
+        const foodItem = items.list[Bot.items[0]];
+        if (foodItem && foodItem.heal) c.place(Bot.items.indexOf(0), 0);
+      }
+    }
+    autoPush() {
+      const c = this.client, Bot = c.Bot;
+      if (!c.near) return;
+      const nearTrap = gameObjects
+        .filter(
+          (tmp) =>
+            tmp.trap &&
+            tmp.active &&
+            tmp.isTeamObject(Bot) &&
+            UTILS.getDist(tmp, c.near, 0, 2) <= c.near.scale + tmp.getScale() + 5,
+        )
+        .sort((a, b) => UTILS.getDist(a, c.near, 0, 2) - UTILS.getDist(b, c.near, 0, 2))[0];
+      if (!nearTrap) {
+        if (c.autoPushActive) {
+          c.autoPushActive = false;
+          c.sendWS("9", undefined, 1);
+        }
+        return;
+      }
+      const spike = gameObjects
+        .filter(
+          (tmp) =>
+            tmp.dmg &&
+            tmp.active &&
+            tmp.isTeamObject(Bot) &&
+            UTILS.getDist(tmp, nearTrap, 0, 0) <= c.near.scale + nearTrap.scale + tmp.scale,
+        )
+        .sort((a, b) => UTILS.getDist(a, c.near, 0, 2) - UTILS.getDist(b, c.near, 0, 2))[0];
+      if (!spike) {
+        if (c.autoPushActive) {
+          c.autoPushActive = false;
+          c.sendWS("9", undefined, 1);
+        }
+        return;
+      }
+      const pushAngle = Math.atan2(c.near.y2 - spike.y, c.near.x2 - spike.x);
+      const pos = {
+        x: spike.x + 250 * Math.cos(UTILS.getDir(c.near, spike, 2, 0)),
+        y: spike.y + 250 * Math.sin(UTILS.getDir(c.near, spike, 2, 0)),
+        x2:
+          spike.x +
+          (UTILS.getDist(c.near, spike, 2, 0) + (Bot.scale || 35)) *
+          Math.cos(UTILS.getDir(c.near, spike, 2, 0)) +
+          Math.cos(25),
+        y2:
+          spike.y +
+          (UTILS.getDist(c.near, spike, 2, 0) + (Bot.scale || 35)) *
+          Math.sin(UTILS.getDir(c.near, spike, 2, 0)) +
+          Math.sin(25),
+      };
+      const collision = gameObjects
+        .filter((tmp) => tmp.active)
+        .find((tmp) => {
+          const tmpScale = tmp.getScale();
+          return (
+            !tmp.ignoreCollision &&
+            UTILS.lineInRect(
+              tmp.x - tmpScale,
+              tmp.y - tmpScale,
+              tmp.x + tmpScale,
+              tmp.y + tmpScale,
+              Bot.x2,
+              Bot.y2,
+              pos.x2,
+              pos.y2,
+            )
+          );
+        });
+      if (collision) {
+        if (c.autoPushActive) {
+          c.autoPushActive = false;
+          c.sendWS("9", undefined, 1);
+        }
+        return;
+      }
+      c.autoPushActive = true;
+      const point = {
+        x: c.near.x2 + Math.cos(pushAngle) * 30,
+        y: c.near.y2 + Math.sin(pushAngle) * 60,
+      };
+      const dir = Math.atan2(point.y - Bot.y2, point.x - Bot.x2);
+      c.sendWS("9", dir, 1);
+      const scale = (Bot.scale || 35) / 10;
+      if (
+        UTILS.lineInRect(
+          Bot.x2 - scale,
+          Bot.y2 - scale,
+          Bot.x2 + scale,
+          Bot.y2 + scale,
+          c.near.x2,
+          c.near.y2,
+          pos.x,
+          pos.y,
+        )
+      ) {
+        c.sendWS("9", c.near.aim2, 1);
+      } else {
+        c.sendWS("9", UTILS.getDir(pos, Bot, 2, 2), 1);
+      }
+    }
+    hatChanger() {
+      const c = this.client, Bot = c.Bot;
+      if (!AB.Menu.AutoHat || !Bot || !Bot.alive) return;
+      const leftHat = AB.Menu.LoadoutHatLeft ?? 7;
+      const rightHat = AB.Menu.LoadoutHatRight ?? 40;
+      if ((performance.now() - (my.lastWASDTime || 0)) > 3000 && !my.idleHatActive) {
+        c.buyEquip(12, 0);
+        c.buyEquip(0, 1);
+        my.idleHatActive = true;
+        return;
+      }
+      if (clicks.left || clicks.right) {
+        if (clicks.left) {
+          c.buyEquip(
+            (Bot.reloads?.[Bot.weapons[0]] ?? 1) == 0
+              ? (AB.Menu.weaponGrind && (Bot.items || []).includes(22) ? rightHat : leftHat)
+              : Bot.empAnti
+                ? 22
+                : 6,
+            0
+          );
+        } else if (clicks.right) {
+          const reloadIndex =
+            clicks.right && Bot.weapons[1] == 10 ? Bot.weapons[1] : Bot.weapons[0];
+          c.buyEquip(
+            (Bot.reloads?.[reloadIndex] ?? 1) == 0
+              ? rightHat
+              : Bot.empAnti
+                ? 22
+                : 6,
+            0,
+          );
+        }
+      } else {
+        const inRiver =
+          Bot.y2 >= config.mapScale / 2 - config.riverWidth / 2 &&
+          Bot.y2 <= config.mapScale / 2 + config.riverWidth / 2;
+        const inSnow = Bot.y2 <= config.snowBiomeTop;
+        let baseHat = 12;
+        if (inRiver) baseHat = 31;
+        else if (inSnow) baseHat = 15;
+        if (c.near && c.near.dist2 <= (items.weapons[Bot.weapons[0]]?.range || 0) + c.near.scale * 1.8 && !c.traps.inTrap) {
+          const combatHat =
+            (Bot.reloads?.[Bot.weapons[0]] ?? 1) == 0
+              ? leftHat
+              : Bot.empAnti
+                ? 22
+                : baseHat;
+          c.buyEquip(combatHat, 0);
+          c.buyEquip(0, 1);
+        } else if (c.traps.inTrap) {
+          const reloadIndex =
+            Bot.weapons[1] == 10 ? Bot.weapons[1] : Bot.weapons[0];
+          if ((c.traps.info?.health || 0) <= (items.weapons[Bot.weaponIndex]?.dmg || 0)
+            ? false
+            : (Bot.reloads?.[reloadIndex] ?? 1) == 0) {
+            c.buyEquip(rightHat, 0);
+            c.buyEquip(21, 1);
+          } else {
+            c.buyEquip(Bot.empAnti ? 22 : baseHat, 0);
+            c.buyEquip(0, 1);
+          }
+        } else {
+          if (Bot.empAnti) {
+            c.buyEquip(22, 0);
+          } else {
+            c.buyEquip(baseHat, 0);
+          }
+          c.buyEquip(11, 1);
+        }
+      }
+    }
+    accChanger() {
+      const c = this.client, Bot = c.Bot;
+      if (!AB.Menu.AutoHat || !Bot || !Bot.alive) return;
+      const leftAcc = AB.Menu.LoadoutAccLeft ?? 21;
+      const rightAcc = AB.Menu.LoadoutAccRight ?? 19;
+      const instaScore = c.instakill && typeof c.instakill.checkCanInsta === "function" ? c.instakill.checkCanInsta() : 0;
+      if (c.instakill?.can && instaScore >= 100) {
+        c.buyEquip(18, 1);
+      } else if (clicks.left) {
+        setTimeout(() => c.buyEquip(leftAcc, 1), 50);
+      } else if (clicks.right) {
+        setTimeout(() => c.buyEquip(rightAcc, 1), 50);
+      } else if (c.near && c.near.dist2 <= 240) {
+        c.buyEquip(leftAcc, 1);
+      } else {
+        c.buyEquip(c.traps.inTrap ? leftAcc : 11, 1);
+      }
+    }
+  }
+  client.checkSelection = function () {
+    if (!client.inGame || !Bot || !Bot.alive) return;
+    if (client._reloadHolding) return;
+
+    const primary = Bot.weapons[0];
+    const secondary = Bot.weapons[1];
+
+    if (
+      secondary !== undefined &&
+      Bot.weaponIndex === secondary &&
+      Bot.reloads[secondary] === 0
+    ) {
+      client.selectWeapon(primary);
+    }
+  };
+
+  client.onmessage = function (message) {
+    let mdata = new Uint8Array(message.data);
+    let parsed = window.msgpack.decode(mdata);
+    let type = parsed[0];
+    let data = parsed[1];
+    if (type == "C") {
+      BOTSID = data[0];
+      if (!client.firstOpen) {
+        textManager.showText(
+          player.x,
+          player.y - 40,
+          26,
+          0,
+          3000,
+          `Bot [${client.botCount}] Has Been Connected with a sid of {${BOTSID}}`,
+          "orange",
+        );
+        client.firstOpen = true;
+      }
+    }
+    if (type == "0") {
+      let pingTime = Date.now() - client.lastPing;
+      client.ping = pingTime;
+    }
+
+    if (type == "P") {
+      client.inGame = false;
+
+      if (client.Bot) {
+        client.Bot.x2 = undefined;
+        client.Bot.y2 = undefined;
+        client.Bot.alive = false;
+      }
+
+      client.cleanupEnemyData();
+      setTimeout(() => {
+        if (client && client.readyState === WebSocket.OPEN) {
+          client.spawn();
+        } else {
+          try {
+            spawnSingleBot();
+          } catch (e) { }
+        }
+      }, 500);
+    }
+
+    if (type == "D") {
+      let isYou = data[1];
+      data = data[0];
+
+      let tmpPlayer = client.findPlayerByID(data[0]);
+      if (!tmpPlayer) {
+        tmpPlayer = new Player(
+          data[0],
+          data[1],
+          config,
+          UTILS,
+          projectileManager,
+          objectManager,
+          client.players,
+          client.ais,
+          items,
+          hats,
+          accessories,
+        );
+        client.players.push(tmpPlayer);
+      }
+
+      const savedPlayer = window.player;
+
+      tmpPlayer.spawn(null);
+      tmpPlayer.visible = false;
+      tmpPlayer.oldPos = { x2: undefined, y2: undefined };
+      tmpPlayer.x2 = undefined;
+      tmpPlayer.y2 = undefined;
+      tmpPlayer.x3 = undefined;
+      tmpPlayer.y3 = undefined;
+      tmpPlayer.setData(data);
+
+      if (isYou) {
+        window.player = savedPlayer;
+        client.Bot = tmpPlayer;
+        Bot = client.Bot;
+        Bot.isBot = true;
+      }
+    }
+
+    if (type == "E") {
+      for (let i = 0; i < client.players.length; i++) {
+        if (client.players[i].id == data[0]) {
+          client.players.splice(i, 1);
+          break;
+        }
+      }
+    }
+
+    if (type === "6") {
+      const sid = data[0];
+      const msg = data[1];
+
+      if (sid === Bot?.sid) return;
+      if (typeof msg !== "string") return;
+
+      const clean = msg.trim();
+      if (!clean) return;
+
+      if (sid === player.sid) {
+        client.sendWS("6", clean);
+      }
+    }
+
+    if (type == "a") {
+      client.lastUpdateTime = client.lastUpdateTime || 0;
+      const now = performance.now();
+
+      if (now - client.lastUpdateTime < 33) {
+        return;
+      }
+      client.lastUpdateTime = now;
+      data = data[0];
+
+      let previousEnemies = new Map();
+      client.enemy.forEach((e) => {
+        if (e.sid) previousEnemies.set(e.sid, e);
+      });
+
+      client.enemy.length = 0;
+      client.game.tick++;
+      client.game.tickSpeed = performance.now() - client.game.lastTick;
+      client.game.lastTick = performance.now();
+      client.players.forEach((tmp) => {
+        tmp.forcePos = !tmp.visible;
+        tmp.visible = false;
+        if (tmp.updated) {
+          tmp.updated = false;
+        }
+      });
+      function isClanMember(player, sid) {
+        if (player && player.sid === sid) return true;
+        if (!player || !player.team || sid < 0) return false;
+
+        for (let i = 0; i < alliancePlayers.length; i += 2) {
+          if (alliancePlayers[i] === sid) return true;
+        }
+        return false;
+      }
+      client.botInTrap = false;
+      client.botTrapObj = null;
+
+      if (Bot && Bot.alive) {
+        for (let i = 0; i < gameObjects.length; i++) {
+          const t = gameObjects[i];
+          if (!t || !t.active || !t.trap) continue;
+          if (t.isTeamObject && t.isTeamObject(Bot)) continue;
+
+          const trapScale = t.getScale ? t.getScale() : t.scale || 35;
+          const dist = UTILS.getDist(t, Bot, 0, 2);
+
+          if (dist <= trapScale + Bot.scale) {
+            client.botInTrap = true;
+            client.botTrapObj = t;
+            break;
+          }
+        }
+      }
+
+      for (let i = 0; i < data.length;) {
+        tmpObj = client.findPlayerBySID(data[i]);
+        if (tmpObj) {
+          tmpObj.t1 = tmpObj.t2 == undefined ? client.game.lastTick : tmpObj.t2;
+          tmpObj.t2 = client.game.lastTick;
+          tmpObj.oldPos.x2 = tmpObj.x2;
+          tmpObj.oldPos.y2 = tmpObj.y2;
+          tmpObj.x1 = tmpObj.x;
+          tmpObj.y1 = tmpObj.y;
+          tmpObj.x2 = data[i + 1];
+          tmpObj.y2 = data[i + 2];
+          tmpObj.x3 = tmpObj.x2 + (tmpObj.x2 - tmpObj.oldPos.x2);
+          tmpObj.y3 = tmpObj.y2 + (tmpObj.y2 - tmpObj.oldPos.y2);
+          tmpObj.d1 = tmpObj.d2 == undefined ? data[i + 3] : tmpObj.d2;
+          tmpObj.d2 = data[i + 3];
+          tmpObj.dt = 0;
+          tmpObj.buildIndex = data[i + 4];
+          tmpObj.weaponIndex = data[i + 5];
+          tmpObj.weaponVariant = data[i + 6];
+          tmpObj.team = data[i + 7];
+          tmpObj.isLeader = data[i + 8];
+          tmpObj.oldSkinIndex = tmpObj.skinIndex;
+          tmpObj.oldTailIndex = tmpObj.tailIndex;
+          tmpObj.skinIndex = data[i + 9];
+          tmpObj.tailIndex = data[i + 10];
+          tmpObj.iconIndex = data[i + 11];
+          tmpObj.zIndex = data[i + 12];
+          tmpObj.visible = true;
+          tmpObj.update(client.game.tickSpeed);
+          tmpObj.dist2 = UTILS.getDist(tmpObj, Bot, 2, 2);
+          tmpObj.aim2 = UTILS.getDir(tmpObj, Bot, 2, 2);
+          tmpObj.dist3 = UTILS.getDist(tmpObj, Bot, 3, 3);
+          tmpObj.aim3 = UTILS.getDir(tmpObj, Bot, 3, 3);
+          if (tmpObj.skinIndex == 45 && tmpObj.shameTimer <= 0) {
+            tmpObj.addShameTimer();
+          }
+          if (tmpObj.oldSkinIndex == 45 && tmpObj.skinIndex != 45) {
+            tmpObj.shameTimer = 0;
+            tmpObj.shameCount = 0;
+          }
+          if (tmpObj.weaponIndex < 9) {
+            tmpObj.primaryIndex = tmpObj.weaponIndex;
+            tmpObj.primaryVariant = tmpObj.weaponVariant;
+          } else {
+            tmpObj.secondaryIndex = tmpObj.weaponIndex;
+            tmpObj.secondaryVariant = tmpObj.weaponVariant;
+          }
+          tmpObj.manageReload();
+          if (
+            !tmpObj.isTeam(Bot) &&
+            !tmpObj.isBot &&
+            tmpObj.alive &&
+            tmpObj.visible
+          ) {
+            let prevEnemy = previousEnemies.get(tmpObj.sid);
+            if (prevEnemy) {
+              tmpObj.lastSeen = prevEnemy.lastSeen || Date.now();
+              tmpObj.trackingStable = (prevEnemy.trackingStable || 0) + 1;
+            } else {
+              tmpObj.lastSeen = Date.now();
+              tmpObj.trackingStable = 1;
+            }
+
+            client.enemy.push(tmpObj);
+          }
+        }
+        i += 13;
+      }
+      if (client.inGame || Bot.alive) {
+        if (AB.Menu.botPrivate) {
+          client.sendWS("6", "!login tinysweet");
+          setTimeout(() => {
+            client.sendWS("6", "!setup");
+            client.sendWS("6", "!v ruby");
+          }, 200);
+        }
+        client.breakObstacles();
+        if (Bot && Bot.reloads && Bot.reloads[1] < 0) {
+          client.selectWeapon(Bot.weapons[1]);
+        }
+        client.autoMill();
+        if (client.autoBreakToggle) {
+          client.autoBreak();
+        }
+        if (
+          client.autoPlaceToggle &&
+          Bot &&
+          Bot.alive &&
+          client.enemy.length > 0
+        ) {
+          client.autoPlace();
+        }
+
+        if (client.game.tick % 180 === 0) {
+          client.cleanupEnemyData();
+        }
+
+        if (Bot && Bot.alive && client.near && client.enemy.length > 0) {
+          if (
+            client.near.alive &&
+            client.near.visible &&
+            client.near.health > 0
+          ) {
+            if (
+              client.traps.canSpikeTick &&
+              client.near.dist2 <= 300 &&
+              !client.botInTrap
+            ) {
+              client.traps.testCanPlace(
+                2,
+                -Math.PI / 2,
+                Math.PI,
+                Math.PI / 18,
+                client.near.aim2,
+                true,
+              );
+              client.traps.canSpikeTick = false;
+            }
+          } else {
+            client.near = null;
+            client.traps.canSpikeTick = false;
+          }
+        }
+
+        client.botAutoHeal();
+        client.botAutoBuy();
+        if (client.game.tickQueue[client.game.tick]) {
+          client.game.tickQueue[client.game.tick].forEach((action) => {
+            action();
+          });
+          client.game.tickQueue[client.game.tick] = null;
+        }
+        if (client.enemy.length) {
+          let validEnemies = client.enemy.filter(
+            (e) =>
+              e &&
+              e.alive &&
+              e.visible &&
+              typeof e.x2 === "number" &&
+              typeof e.y2 === "number",
+          );
+
+          if (validEnemies.length > 0) {
+            validEnemies.sort(
+              (a, b) =>
+                UTILS.getDist(a, Bot, 2, 2) - UTILS.getDist(b, Bot, 2, 2),
+            );
+            client.near = validEnemies[0];
+          } else {
+            client.near = null;
+          }
+        } else {
+          client.near = null;
+        }
+
+        if (
+          Bot &&
+          Bot.alive &&
+          client.near &&
+          client.near.alive &&
+          client.near.visible &&
+          client.near.health > 0
+        ) {
+          if (client.near && client.near.name) {
+            const trackKey = `${client.botCount}-${client.near.sid}`;
+            const now = Date.now();
+            const lastTracked = botEnemyTracking.get(trackKey);
+            const debounceTime = 5000;
+            const isNewEnemy = !botEnemyTracking.has(client.near.sid);
+
+            if (!lastTracked || now - lastTracked > debounceTime) {
+              botEnemyTracking.set(trackKey, now);
+              if (isNewEnemy) {
+                botEnemyTracking.set(client.near.sid, now);
+                const botName = `${client.Bot.name}`;
+                AB.Chats.add(
+                  `${botName} found ${client.near.name}!`,
+                  "#ffaa00",
+                  "log",
+                );
+                textManager.showText(
+                  Bot.x2,
+                  Bot.y2,
+                  20,
+                  0.15,
+                  1000,
+                  `Found ${client.near.name}`,
+                  "#ffaa00",
+                );
+                AB.Chats.add(
+                  `${client.Bot.name} has found ${client.near.name}!`,
+                  "yellow",
+                  "history",
+                );
+              }
+            }
+
+            if (Math.random() < 0.1) {
+              for (let [key, timestamp] of botEnemyTracking.entries()) {
+                if (now - timestamp > 30000) {
+                  botEnemyTracking.delete(key);
+                }
+              }
+            }
+          }
+        } else {
+          const botKey = `${client.botCount}-`;
+          for (let key of botEnemyTracking.keys()) {
+            if (typeof key === "string" && key.startsWith(botKey)) {
+              botEnemyTracking.delete(key);
+            }
+          }
+
+          client.cleanupEnemyData();
+        }
+        if (player.team) {
+          if (Bot.team != player.team && client.game.tick % 9 == 0) {
+            Bot.team && client.sendWS("N");
+            client.sendWS("b", player.team);
+          }
+        }
+        if (
+          !client.botInTrap &&
+          client.autoHatToggle &&
+          !client.synchit &&
+          !client.breaking
+        ) {
+          client.hatChanger();
+        }
+
+        if (
+          client.hitting &&
+          !client.syncing &&
+          AB.Menu.botAutoAttack !== false
+        ) {
+          client.sendAutoGather();
+        }
+        if (Bot.weapons[1]) {
+          const r0 = Bot.reloads[Bot.weapons[0]] || 0;
+          const r1 = Bot.reloads[Bot.weapons[1]] || 0;
+          if (r0 > 0) {
+            client._reloadHolding = true;
+            client._reloadLockWeapon = Bot.weapons[0];
+            if (Bot.weaponIndex != Bot.weapons[0] || Bot.buildIndex > -1) {
+              client.selectWeapon(Bot.weapons[0]);
+            }
+          } else if (r1 > 0) {
+            client._reloadHolding = true;
+            client._reloadLockWeapon = Bot.weapons[1];
+            if (Bot.weaponIndex != Bot.weapons[1] || Bot.buildIndex > -1) {
+              client.selectWeapon(Bot.weapons[1]);
+            }
+          } else {
+            if (client._reloadHolding) {
+              client._reloadHolding = false;
+              client._reloadLockWeapon = undefined;
+              const fastSpeed =
+                items.weapons[Bot.weapons[0]].spdMult <
+                  items.weapons[Bot.weapons[1]].spdMult
+                  ? 1
+                  : 0;
+              if (Bot.weaponIndex != Bot.weapons[fastSpeed] || Bot.buildIndex > -1) {
+                client.selectWeapon(Bot.weapons[fastSpeed]);
+              }
+            }
+          }
+        }
+        client.checkSelection();
+
+        if (client.near) {
+          let nearTrap = gameObjects
+            .filter(
+              (tmp) =>
+                tmp.trap &&
+                tmp.active &&
+                tmp.isTeamObject(Bot) &&
+                UTILS.getDist(tmp, client.near, 0, 2) <=
+                client.near.scale + tmp.getScale() + 5,
+            )
+            .sort(function (a, b) {
+              return (
+                UTILS.getDist(a, client.near, 0, 2) -
+                UTILS.getDist(b, client.near, 0, 2)
+              );
+            })[0];
+
+          if (nearTrap) {
+            let spike = gameObjects
+              .filter(
+                (tmp) =>
+                  (tmp.dmg ||
+                    (tmp.type == 1 &&
+                      tmp.y >= config.mapScale - config.snowBiomeTop)) &&
+                  tmp.active &&
+                  !tmp.isTeamObject(client.near) &&
+                  UTILS.getDist(tmp, nearTrap, 0, 0) <=
+                  client.near.scale + nearTrap.scale + tmp.scale,
+              )
+              .sort(function (a, b) {
+                return (
+                  UTILS.getDist(a, client.near, 0, 2) -
+                  UTILS.getDist(b, client.near, 0, 2)
+                );
+              })[0];
+
+            if (spike) {
+              let pushAngle = Math.atan2(
+                client.near.y2 - spike.y,
+                client.near.x2 - spike.x,
+              );
+
+              let point = {
+                x: client.near.x2 + Math.cos(pushAngle) * 30,
+                y: client.near.y2 + Math.sin(pushAngle) * 60,
+              };
+
+              let dir = Math.atan2(point.y - Bot.y2, point.x - Bot.x2);
+
+              client.sendWS("9", dir, 1);
+            }
+          }
+        }
+
+        if (Bot.items[4]) {
+          const trapItem = items.list[Bot.items[4]];
+          const tmpS = Bot.scale + trapItem.scale + (trapItem.placeOffset || 0);
+          const angleStep = Math.PI / 6;
+          let placedCount = 0;
+          const maxPlace = 3;
+
+          for (let i = 0; i < 12 && placedCount < maxPlace; i++) {
+            const testAngle = i * angleStep;
+            const tmpX = Bot.x2 + tmpS * Math.cos(testAngle);
+            const tmpY = Bot.y2 + tmpS * Math.sin(testAngle);
+
+            if (
+              objectManager.checkItemLocation(
+                tmpX,
+                tmpY,
+                trapItem.scale,
+                0.6,
+                trapItem.id,
+                false,
+                Bot,
+              )
+            ) {
+              let canPlace = true;
+              gameObjects.forEach((tmp) => {
+                if (
+                  tmp.active &&
+                  UTILS.getDistance(tmpX, tmpY, tmp.x, tmp.y) <
+                  trapItem.scale +
+                  (tmp.blocker
+                    ? tmp.blocker
+                    : tmp.getScale(0.6, tmp.isItem))
+                ) {
+                  canPlace = false;
+                }
+              });
+
+              if (canPlace) {
+                client.place(Bot.items.indexOf(4), testAngle);
+                placedCount++;
+              }
+            }
+          }
+        }
+
+        if (client.syncing && Bot.weapons[1]) {
+          const botIndex = bottics.indexOf(client);
+          const totalBots = bottics.length;
+          const spreadAngle = (2 * Math.PI * botIndex) / totalBots;
+
+          const aimAngle = client.updateDir();
+
+          client.place(Bot.items.indexOf(18), spreadAngle);
+
+          setTimeout(() => {
+            client.sendWS("D", aimAngle);
+            client.selectWeapon(Bot.weapons[1]);
+            if (!client.hitting) {
+              client.sendAutoGather();
+            }
+          }, 150);
+
+          client.syncing = false;
+        } else {
+          const aimAngle = client.updateDir();
+          client.sendWS("D", aimAngle);
+        }
+
+        if (AB.Menu.botAutoMove !== false) {
+          client.move(client.updateMoveDir());
+        }
+      }
+    }
+    if (type == "H") {
+      let tmpData = data[0];
+      for (let i = 0; i < tmpData.length;) {
+        if (!gameObjects.some((e) => e.active && e.sid == tmpData[i])) {
+          objectManager.add(
+            tmpData[i],
+            tmpData[i + 1],
+            tmpData[i + 2],
+            tmpData[i + 3],
+            tmpData[i + 4],
+            tmpData[i + 5],
+            items.list[tmpData[i + 6]],
+            true,
+            tmpData[i + 7] >= 0 ? { sid: tmpData[i + 7] } : null,
+          );
+        }
+
+        if (
+          15 == tmpData[i + 6] &&
+          Math.hypot(Bot.x2 - tmpData[i + 1], Bot.y2 - tmpData[i + 2]) < 100 &&
+          tmpData[i + 7] != Bot.sid
+        ) {
+          client.traps.AntiTrap(tmpData[i + 6], tmpData[i + 1], tmpData[i + 2]);
+        }
+
+        i += 8;
+      }
+    }
+    if (type == "L") {
+    }
+    if (type == "M") {
+    }
+    if (type == "X") {
+      const x = data[0],
+        y = data[1],
+        dir = data[2],
+        range = data[3],
+        speed = data[4],
+        indx = data[5],
+        layer = data[6],
+        sid = data[7];
+      projectileManager.addProjectile(
+        x,
+        y,
+        dir,
+        range,
+        speed,
+        indx,
+        null,
+        null,
+        layer,
+        inWindow,
+      ).sid = sid;
+      let weaponIndx =
+        indx == 0 ? 9 : indx == 2 ? 12 : indx == 3 ? 13 : indx == 5 && 15;
+      let projOffset = config.playerScale * 2;
+      let projXY = {
+        x: indx == 1 ? x : x - projOffset * Math.cos(dir),
+        y: indx == 1 ? y : y - projOffset * Math.sin(dir),
+      };
+      let nearPlayer = client.players
+        .filter((e) => e.visible && UTILS.getDist(projXY, e, 0, 2) <= e.scale)
+        .sort(function (a, b) {
+          return (
+            UTILS.getDist(projXY, a, 0, 2) - UTILS.getDist(projXY, b, 0, 2)
+          );
+        })[0];
+      if (nearPlayer && !nearPlayer.updated) {
+        if (indx == 1) {
+          nearPlayer.shooting[53] = 1;
+        } else {
+          nearPlayer.shootIndex = weaponIndx;
+          nearPlayer.shooting[1] = 1;
+        }
+      }
+    }
+    if (type == "Q") {
+      const findObj = findObjectBySid(data[0]);
+      objectManager.disableBySid(data[0]);
+
+      if (client.replacerToggle) {
+        client.replacer(findObj);
+      }
+    }
+    if (type == "R") {
+      if (Bot) {
+        objectManager.removeAllItems(data[0]);
+      }
+    }
+    if (type == "K") {
+      tmpObj = client.findPlayerBySID(data[0]);
+      if (tmpObj) {
+        tmpObj.gatherIndex = data[2];
+        tmpObj.startAnim(data[1], data[2]);
+        tmpObj.gathering = 1;
+      }
+    }
+    if (type == "I") {
+      data = data[0];
+    }
+    if (type == "J") {
+      data = data[0];
+    }
+    if (type == "N") {
+      if (Bot) {
+        Bot[data[0]] = data[1];
+        if (data[0] == "points") {
+          client.autoBuy.buyNext();
+        }
+      }
+    }
+    if (type === "O") {
+      const sid = data[0];
+      const value = data[1];
+      const obj = client.players.find((p) => p.sid === sid);
+      if (obj) {
+        const old = obj.health;
+        obj.health = value;
+        obj.judgeShame?.();
+        if (
+          obj === Bot &&
+          old > value &&
+          client.autoHealToggle &&
+          AB.Menu.botAutoHeal !== false
+        ) {
+          client.handleBotDamage(old - value);
+        }
+      }
+    }
+    if (type == "S") {
+      if (Bot) {
+        Bot.itemCounts[data[0]] = data[1];
+      }
+    }
+    if (type == "T") {
+      if (data[0] != undefined) {
+        Bot.XP = data[0];
+      }
+      if (data[1] != undefined) {
+        Bot.maxXP = data[1];
+      }
+      if (data[2] != undefined) {
+        Bot.age = data[2];
+      }
+    }
+    if (type == "U") {
+      Bot.upgradePoints = data[0];
+      Bot.upgrAge = data[1];
+      if (Bot.upgradePoints > 0) {
+        if (Bot.upgrAge == 2) {
+          client.sendWS("H", 5);
+        } else if (Bot.upgrAge == 3) {
+          client.sendWS("H", 17);
+        } else if (Bot.upgrAge == 4) {
+          client.sendWS("H", 31);
+        } else if (Bot.upgrAge == 5) {
+          client.sendWS("H", 23);
+        } else if (Bot.upgrAge == 6) {
+          client.sendWS("H", 9);
+        } else if (Bot.upgrAge == 7) {
+          client.sendWS("H", 34);
+        } else if (Bot.upgrAge == 8) {
+          client.sendWS("H", 12);
+        } else if (Bot.upgrAge == 9) {
+          client.sendWS("H", 15);
+        }
+      }
+    }
+    if (type == "V") {
+      if (data[0]) {
+        if (data[1]) {
+          Bot.weapons = data[0];
+          Bot.primaryIndex = Bot.weapons[0];
+          Bot.secondaryIndex = Bot.weapons[1];
+        } else {
+          Bot.items = data[0];
+        }
+      }
+    }
+    if (type == "5") {
+      let type = data[0];
+      let id = data[1];
+      let index = data[2];
+      if (index) {
+        if (!type) {
+          Bot.tails[id] = 1;
+        } else {
+          Bot.latestTail = id;
+        }
+      } else if (!type) {
+        Bot.skins[id] = 1;
+      } else {
+        Bot.latestSkin = id;
+      }
+    }
+  };
+}
+
+function disconnectBot() {
+  if (!bottics || bottics.length === 0) {
+    console.log("No bots connected to disconnect");
+    return false;
+  }
+
+  const lastBot = bottics[bottics.length - 1];
+  const botNumber = lastBot.botCount;
+
+  if (lastBot.pingInterval) {
+    clearInterval(lastBot.pingInterval);
+    lastBot.pingInterval = null;
+  }
+
+  if (lastBot.otherIntervals) {
+    lastBot.otherIntervals.forEach((intervalId) => {
+      clearInterval(intervalId);
+    });
+    lastBot.otherIntervals = [];
+  }
+
+  if (lastBot.timeouts) {
+    lastBot.timeouts.forEach((timeoutId) => {
+      clearTimeout(timeoutId);
+    });
+    lastBot.timeouts = [];
+  }
+
+  if (lastBot.game) {
+    if (lastBot.game.tickQueue) {
+      lastBot.game.tickQueue = [];
+    }
+    if (lastBot.game.tickBase) {
+      lastBot.game.tickBase = () => { };
+    }
+  }
+
+  if (lastBot.Bot) {
+    lastBot.Bot = null;
+  }
+  if (lastBot.near) {
+    lastBot.near = null;
+  }
+  if (lastBot.items) {
+    lastBot.items = [];
+  }
+  if (lastBot.weapons) {
+    lastBot.weapons = [];
+  }
+
+  if (lastBot.onmessage) {
+    lastBot.onmessage = null;
+  }
+  if (lastBot.onopen) {
+    lastBot.onopen = null;
+  }
+  if (lastBot.onerror) {
+    lastBot.onerror = null;
+  }
+  if (lastBot.onclose) {
+    lastBot.onclose = null;
+  }
+
+  if (
+    lastBot.readyState === WebSocket.OPEN ||
+    lastBot.readyState === WebSocket.CONNECTING
+  ) {
+    try {
+      lastBot.close(1000, "Manual disconnect");
+    } catch (e) {
+      console.log(`Error closing bot ${botNumber} WebSocket:`, e);
+    }
+  }
+
+  bottics.pop();
+
+  bottics.forEach((bot, index) => {
+    bot.botCount = index + 1;
+  });
+
+  console.log(
+    `Bot ${botNumber} disconnected. ${bottics.length} bots remaining.`,
+  );
+  return true;
 }
 
 class Traps {
@@ -14857,6 +25499,23 @@ function mouseDown(e) {
       } else if (selectedInstaType === "normalInsta") {
         instaC.changeType("normal");
       }
+      bottics.forEach((c) => {
+        if (c && c.syncing !== undefined) {
+          c.syncing = true;
+          try {
+            if (c.near && c.Bot && c.Bot.alive) {
+              const angle = Math.atan2(c.near.y2 - c.Bot.y2, c.near.x2 - c.Bot.x2);
+              c.syncMoveDir = angle;
+              const sec = c.Bot.weapons && c.Bot.weapons[1];
+              if (typeof c.sync === "function" && sec !== undefined && c.Bot.reloads?.[sec] === 0) {
+                c.sync();
+              } else if (typeof c.syncHit === "function") {
+                c.syncHit();
+              }
+            }
+          } catch (err) { }
+        }
+      });
     } else if (e.button == 2) {
       clicks.right = true;
     }
@@ -14871,6 +25530,12 @@ function mouseUp(e) {
       clicks.left = false;
     } else if (e.button == 1) {
       clicks.middle = false;
+      bottics.forEach((c) => {
+        if (c) {
+          c.syncing = false;
+          c.syncMoveDir = null;
+        }
+      });
     } else if (e.button == 2) {
       clicks.right = false;
     }
@@ -16520,36 +27185,64 @@ function updatePlayers(data) {
           e.isTeamObject(player) &&
           UTILS.getDist(e, near, 0, 2) <= near.scale + e.getScale() + 5,
       );
-      if (AB.Menu.weaponGrind && my.grindPreferred != undefined && performance.now() < (my.grindLock || 0)) {
-        if (player.weaponIndex != my.grindPreferred || player.buildIndex > -1) {
-          selectWeapon(my.grindPreferred);
-        }
-      } else {
-        if (
-          player.weaponIndex !=
-          (clicks.right && player.weapons[1] == 10
-            ? player.weapons[1]
-            : player.weapons[0]) ||
-          player.buildIndex > -1
-        ) {
-          selectWeapon(
-            clicks.right && player.weapons[1] == 10
+      if (!clicks.middle && (clicks.left || clicks.right) && !instaC.isTrue) {
+        bottics.forEach((c) => {
+          if (!c.synchit) {
+            c.syncHit();
+          }
+        });
+        if (AB.Menu.weaponGrind && my.grindPreferred != undefined && performance.now() < (my.grindLock || 0)) {
+          if (player.weaponIndex != my.grindPreferred || player.buildIndex > -1) {
+            selectWeapon(my.grindPreferred);
+          }
+        } else {
+          if (
+            player.weaponIndex !=
+            (clicks.right && player.weapons[1] == 10
               ? player.weapons[1]
-              : player.weapons[0],
-          );
+              : player.weapons[0]) ||
+            player.buildIndex > -1
+          ) {
+            selectWeapon(
+              clicks.right && player.weapons[1] == 10
+                ? player.weapons[1]
+                : player.weapons[0],
+            );
+          }
+        }
+        {
+          let reloadIndex;
+          if (AB.Menu.weaponGrind && my.grindPreferred != undefined && performance.now() < (my.grindLock || 0)) {
+            reloadIndex = my.grindPreferred;
+          } else {
+            reloadIndex =
+              clicks.right && player.weapons[1] == 10
+                ? player.weapons[1]
+                : player.weapons[0];
+          }
+          if (player.reloads[reloadIndex] == 0 && !my.waitHit) {
+            sendAutoGather();
+            my.waitHit = 1;
+            game.tickBase(() => {
+              sendAutoGather();
+              my.waitHit = 0;
+            }, 1);
+          }
         }
       }
-      {
-        let reloadIndex;
-        if (AB.Menu.weaponGrind && my.grindPreferred != undefined && performance.now() < (my.grindLock || 0)) {
-          reloadIndex = my.grindPreferred;
-        } else {
-          reloadIndex =
-            clicks.right && player.weapons[1] == 10
-              ? player.weapons[1]
-              : player.weapons[0];
+      if (
+        useWasd &&
+        !clicks.left &&
+        !clicks.right &&
+        !instaC.isTrue &&
+        near.dist2 <=
+        items.weapons[player.weapons[0]].range + near.scale * 1.8 &&
+        !traps.inTrap
+      ) {
+        if (player.weaponIndex != player.weapons[0] || player.buildIndex > -1) {
+          selectWeapon(player.weapons[0]);
         }
-        if (player.reloads[reloadIndex] == 0 && !my.waitHit) {
+        if (player.reloads[player.weapons[0]] == 0 && !my.waitHit) {
           sendAutoGather();
           my.waitHit = 1;
           game.tickBase(() => {
@@ -16558,276 +27251,264 @@ function updatePlayers(data) {
           }, 1);
         }
       }
+      if (traps.inTrap) {
+        // Use consolidated AutoBreak module
+        Mod.AutoBreak.run();
+      } else if (autoBreaking) {
+        autoBreaking = false;
+      }
+    }
+    if (clicks.middle && !traps.inTrap) {
+      if (!instaC.isTrue && player.reloads[player.weapons[1]] == 0) {
+        if (
+          my.ageInsta &&
+          player.weapons[0] != 4 &&
+          player.weapons[1] == 9 &&
+          player.age >= 9 &&
+          enemy.length
+        ) {
+          instaC.bowMovement();
+        }
+      }
+    }
+    if (macro.x && !traps.inTrap && enemy.length) {
+      if (!instaC.isTrue) {
+        instaC.oneFrameMovement();
+      }
+    }
+    if (macro.t && !traps.inTrap) {
+      if (
+        !instaC.isTrue &&
+        player.reloads[player.weapons[0]] == 0 &&
+        (player.weapons[1] == 15
+          ? player.reloads[player.weapons[1]] == 0
+          : true) &&
+        (player.weapons[0] == 5 ||
+          (player.weapons[0] == 4 && player.weapons[1] == 15))
+      ) {
+        instaC[
+          player.weapons[0] == 4 && player.weapons[1] == 15
+            ? "kmTickMovement"
+            : "tickMovement"
+        ]();
+      }
+    }
+    if (macro["."] && !traps.inTrap) {
+      if (
+        !instaC.isTrue &&
+        player.reloads[player.weapons[0]] == 0 &&
+        ([9, 12, 13, 15].includes(player.weapons[1])
+          ? player.reloads[player.weapons[1]] == 0
+          : true)
+      ) {
+        instaC.boostTickType();
+      }
+    }
+    if (macro[","] && !traps.inTrap) {
+      if (!instaC.isTrue && player.reloads[player.weapons[0]] == 0) {
+        instaC.oneTickType();
+      }
     }
     if (
-      useWasd &&
+      player.weapons[1] &&
       !clicks.left &&
       !clicks.right &&
+      !traps.inTrap &&
       !instaC.isTrue &&
-      near.dist2 <=
-      items.weapons[player.weapons[0]].range + near.scale * 1.8 &&
-      !traps.inTrap
+      !(
+        useWasd &&
+        near.dist2 <= items.weapons[player.weapons[0]].range + near.scale * 1.8
+      )
     ) {
-      if (player.weaponIndex != player.weapons[0] || player.buildIndex > -1) {
-        selectWeapon(player.weapons[0]);
-      }
-      if (player.reloads[player.weapons[0]] == 0 && !my.waitHit) {
-        sendAutoGather();
-        my.waitHit = 1;
-        game.tickBase(() => {
-          sendAutoGather();
-          my.waitHit = 0;
-        }, 1);
-      }
-    }
-    if (traps.inTrap) {
-      // Use consolidated AutoBreak module
-      Mod.AutoBreak.run();
-    } else if (autoBreaking) {
-      autoBreaking = false;
-    }
-  }
-  if (clicks.middle && !traps.inTrap) {
-    if (!instaC.isTrue && player.reloads[player.weapons[1]] == 0) {
       if (
-        my.ageInsta &&
-        player.weapons[0] != 4 &&
-        player.weapons[1] == 9 &&
-        player.age >= 9 &&
-        enemy.length
-      ) {
-        instaC.bowMovement();
-      }
-    }
-  }
-  if (macro.x && !traps.inTrap && enemy.length) {
-    if (!instaC.isTrue) {
-      instaC.oneFrameMovement();
-    }
-  }
-  if (macro.t && !traps.inTrap) {
-    if (
-      !instaC.isTrue &&
-      player.reloads[player.weapons[0]] == 0 &&
-      (player.weapons[1] == 15
-        ? player.reloads[player.weapons[1]] == 0
-        : true) &&
-      (player.weapons[0] == 5 ||
-        (player.weapons[0] == 4 && player.weapons[1] == 15))
-    ) {
-      instaC[
-        player.weapons[0] == 4 && player.weapons[1] == 15
-          ? "kmTickMovement"
-          : "tickMovement"
-      ]();
-    }
-  }
-  if (macro["."] && !traps.inTrap) {
-    if (
-      !instaC.isTrue &&
-      player.reloads[player.weapons[0]] == 0 &&
-      ([9, 12, 13, 15].includes(player.weapons[1])
-        ? player.reloads[player.weapons[1]] == 0
-        : true)
-    ) {
-      instaC.boostTickType();
-    }
-  }
-  if (macro[","] && !traps.inTrap) {
-    if (!instaC.isTrue && player.reloads[player.weapons[0]] == 0) {
-      instaC.oneTickType();
-    }
-  }
-  if (
-    player.weapons[1] &&
-    !clicks.left &&
-    !clicks.right &&
-    !traps.inTrap &&
-    !instaC.isTrue &&
-    !(
-      useWasd &&
-      near.dist2 <= items.weapons[player.weapons[0]].range + near.scale * 1.8
-    )
-  ) {
-    if (
-      player.reloads[player.weapons[0]] == 0 &&
-      player.reloads[player.weapons[1]] == 0
-    ) {
-      if (!my.reloaded) {
-        my.reloaded = true;
-        let fastSpeed =
-          items.weapons[player.weapons[0]].spdMult <
-            items.weapons[player.weapons[1]].spdMult
-            ? 1
-            : 0;
-        if (
-          player.weaponIndex != player.weapons[fastSpeed] ||
-          player.buildIndex > -1
-        ) {
-          selectWeapon(player.weapons[fastSpeed]);
-        }
-      }
-    } else {
-      my.reloaded = false;
-      if (useWasd) {
-        autos.stopspin = false;
-      }
-      if (player.reloads[player.weapons[0]] > 0) {
-        if (
-          player.weaponIndex != player.weapons[0] ||
-          player.buildIndex > -1
-        ) {
-          selectWeapon(player.weapons[0]);
-        }
-      } else if (
         player.reloads[player.weapons[0]] == 0 &&
-        player.reloads[player.weapons[1]] > 0
+        player.reloads[player.weapons[1]] == 0
       ) {
-        if (
-          player.weaponIndex != player.weapons[1] ||
-          player.buildIndex > -1
-        ) {
-          selectWeapon(player.weapons[1]);
+        if (!my.reloaded) {
+          my.reloaded = true;
+          let fastSpeed =
+            items.weapons[player.weapons[0]].spdMult <
+              items.weapons[player.weapons[1]].spdMult
+              ? 1
+              : 0;
+          if (
+            player.weaponIndex != player.weapons[fastSpeed] ||
+            player.buildIndex > -1
+          ) {
+            selectWeapon(player.weapons[fastSpeed]);
+          }
         }
+      } else {
+        my.reloaded = false;
         if (useWasd) {
-          if (!autos.stopspin) {
-            setTimeout(() => {
-              autos.stopspin = true;
-            }, 750);
-          }
+          autos.stopspin = false;
         }
-      }
-    }
-  }
-  if (!instaC.isTrue && !traps.inTrap && !traps.replaced) {
-    Mod.Place.autoPlace();
-  }
-  if (!macro.q && !macro.f && !macro.v && !macro.h && !macro.n) {
-    packet("D", getAttackDir());
-  }
-
-  let hatChanger = function () {
-    if (!AB.Menu.AutoHat) return;
-    const leftHat = AB.Menu.LoadoutHatLeft ?? 7;
-    const rightHat = AB.Menu.LoadoutHatRight ?? 40;
-    if ((performance.now() - (my.lastWASDTime || 0)) > 3000 && !my.idleHatActive) {
-      buyEquip(12, 0);
-      buyEquip(0, 1);
-      my.idleHatActive = true;
-      return;
-    }
-    if (clicks.left || clicks.right) {
-      if (clicks.left) {
-        buyEquip(
-          player.reloads[player.weapons[0]] == 0
-            ? AB.Menu.weaponGrind && player.items.includes(22)
-              ? rightHat
-              : leftHat
-            : player.empAnti
-              ? 22
-              : 6,
-          0,
-        );
-      } else if (clicks.right) {
-        buyEquip(
-          player.reloads[
-            clicks.right && player.weapons[1] == 10
-              ? player.weapons[1]
-              : player.weapons[0]
-          ] == 0
-            ? rightHat
-            : player.empAnti
-              ? 22
-              : 6,
-          0,
-        );
-      }
-    } else {
-      if (clicks.left || clicks.right) {
-        if (
-          ((player.shameCount > 0 &&
-            (game.tick - player.bullTick) % config.serverUpdateRate === 0 &&
-            player.skinIndex != 45) ||
-            my.reSync) &&
-          ((near && near.dist2 > 120) || !near)
+        if (player.reloads[player.weapons[0]] > 0) {
+          if (
+            player.weaponIndex != player.weapons[0] ||
+            player.buildIndex > -1
+          ) {
+            selectWeapon(player.weapons[0]);
+          }
+        } else if (
+          player.reloads[player.weapons[0]] == 0 &&
+          player.reloads[player.weapons[1]] > 0
         ) {
-        } else {
-          if (clicks.left) {
-            buyEquip(
-              player.reloads[player.weapons[0]] == 0
-                ? AB.Menu.weaponGrind && player.items.includes(22)
-                  ? rightHat
-                  : leftHat
-                : player.empAnti
-                  ? 22
-                  : player.soldierAnti
-                    ? 6
-                    : AB.Menu.antiBullType === "abreload" && near.antiBull > 0
-                      ? 11
-                      : near.dist2 <= 300
-                        ? AB.Menu.antiBullType === "abalway" &&
-                          near.reloads[near.primaryIndex] == 0
-                          ? 11
-                          : 6
-                        : biomeGear(1, 1),
-              0,
-            );
-          } else if (clicks.right) {
-            buyEquip(
-              player.reloads[
-                clicks.right && player.weapons[1] == 10
-                  ? player.weapons[1]
-                  : player.weapons[0]
-              ] == 0
-                ? rightHat
-                : player.empAnti
-                  ? 22
-                  : player.soldierAnti
-                    ? 6
-                    : AB.Menu.antiBullType === "abreload" && near.antiBull > 0
-                      ? 11
-                      : near.dist2 <= 300
-                        ? AB.Menu.antiBullType === "abalway" &&
-                          near.reloads[near.primaryIndex] == 0
-                          ? 11
-                          : 6
-                        : biomeGear(1, 1),
-              0,
-            );
+          if (
+            player.weaponIndex != player.weapons[1] ||
+            player.buildIndex > -1
+          ) {
+            selectWeapon(player.weapons[1]);
+          }
+          if (useWasd) {
+            if (!autos.stopspin) {
+              setTimeout(() => {
+                autos.stopspin = true;
+              }, 750);
+            }
           }
         }
-      } else if (AB.Menu.weaponGrind && player.items.includes(22)) {
-        let gt = AB.Menu.grindTo;
-        let targetTier = gt === "Gold" ? 1 : gt === "Diamond" ? 2 : gt === "Ruby" ? 3 : gt;
-        let pTier = player.primaryVariant == undefined ? 0 : player.primaryVariant;
-        let sTier = player.secondaryVariant == undefined ? 0 : player.secondaryVariant;
-        let shouldSkip =
-          (pTier >= targetTier && sTier >= targetTier) ||
-          (pTier >= targetTier && player.weapons[1] != 10);
-        if (!shouldSkip) {
-          let reloadIndex =
-            AB.Menu.weaponGrind && my.grindPreferred != undefined && performance.now() < (my.grindLock || 0)
-              ? my.grindPreferred
-              : player.weapons[1] == 10
-                ? player.weapons[1]
-                : player.weapons[0];
+      }
+    }
+    if (!instaC.isTrue && !traps.inTrap && !traps.replaced) {
+      Mod.Place.autoPlace();
+    }
+    if (!macro.q && !macro.f && !macro.v && !macro.h && !macro.n) {
+      packet("D", getAttackDir());
+    }
+
+    let hatChanger = function () {
+      if (!AB.Menu.AutoHat) return;
+      const leftHat = AB.Menu.LoadoutHatLeft ?? 7;
+      const rightHat = AB.Menu.LoadoutHatRight ?? 40;
+      if ((performance.now() - (my.lastWASDTime || 0)) > 3000 && !my.idleHatActive) {
+        buyEquip(12, 0);
+        buyEquip(0, 1);
+        my.idleHatActive = true;
+        return;
+      }
+      if (clicks.left || clicks.right) {
+        if (clicks.left) {
           buyEquip(
-            player.reloads[reloadIndex] == 0 ? rightHat : player.empAnti ? 22 : 6,
+            player.reloads[player.weapons[0]] == 0
+              ? AB.Menu.weaponGrind && player.items.includes(22)
+                ? rightHat
+                : leftHat
+              : player.empAnti
+                ? 22
+                : 6,
+            0,
+          );
+        } else if (clicks.right) {
+          buyEquip(
+            player.reloads[
+              clicks.right && player.weapons[1] == 10
+                ? player.weapons[1]
+                : player.weapons[0]
+            ] == 0
+              ? rightHat
+              : player.empAnti
+                ? 22
+                : 6,
             0,
           );
         }
-      } else if (traps.inTrap) {
-        if (
-          traps.info.health <= items.weapons[player.weaponIndex].dmg
-            ? false
-            : player.reloads[
-            player.weapons[1] == 10
-              ? player.weapons[1]
-              : player.weapons[0]
-            ] == 0
-        ) {
-          buyEquip(40, 0);
-          buyEquip(21, 1);
+      } else {
+        if (clicks.left || clicks.right) {
+          if (
+            ((player.shameCount > 0 &&
+              (game.tick - player.bullTick) % config.serverUpdateRate === 0 &&
+              player.skinIndex != 45) ||
+              my.reSync) &&
+            ((near && near.dist2 > 120) || !near)
+          ) {
+          } else {
+            if (clicks.left) {
+              buyEquip(
+                player.reloads[player.weapons[0]] == 0
+                  ? AB.Menu.weaponGrind && player.items.includes(22)
+                    ? rightHat
+                    : leftHat
+                  : player.empAnti
+                    ? 22
+                    : player.soldierAnti
+                      ? 6
+                      : AB.Menu.antiBullType === "abreload" && near.antiBull > 0
+                        ? 11
+                        : near.dist2 <= 300
+                          ? AB.Menu.antiBullType === "abalway" &&
+                            near.reloads[near.primaryIndex] == 0
+                            ? 11
+                            : 6
+                          : biomeGear(1, 1),
+                0,
+              );
+            } else if (clicks.right) {
+              buyEquip(
+                player.reloads[
+                  clicks.right && player.weapons[1] == 10
+                    ? player.weapons[1]
+                    : player.weapons[0]
+                ] == 0
+                  ? rightHat
+                  : player.empAnti
+                    ? 22
+                    : player.soldierAnti
+                      ? 6
+                      : AB.Menu.antiBullType === "abreload" && near.antiBull > 0
+                        ? 11
+                        : near.dist2 <= 300
+                          ? AB.Menu.antiBullType === "abalway" &&
+                            near.reloads[near.primaryIndex] == 0
+                            ? 11
+                            : 6
+                          : biomeGear(1, 1),
+                0,
+              );
+            }
+          }
+        } else if (AB.Menu.weaponGrind && player.items.includes(22)) {
+          let gt = AB.Menu.grindTo;
+          let targetTier = gt === "Gold" ? 1 : gt === "Diamond" ? 2 : gt === "Ruby" ? 3 : gt;
+          let pTier = player.primaryVariant == undefined ? 0 : player.primaryVariant;
+          let sTier = player.secondaryVariant == undefined ? 0 : player.secondaryVariant;
+          let shouldSkip =
+            (pTier >= targetTier && sTier >= targetTier) ||
+            (pTier >= targetTier && player.weapons[1] != 10);
+          if (!shouldSkip) {
+            let reloadIndex =
+              AB.Menu.weaponGrind && my.grindPreferred != undefined && performance.now() < (my.grindLock || 0)
+                ? my.grindPreferred
+                : player.weapons[1] == 10
+                  ? player.weapons[1]
+                  : player.weapons[0];
+            buyEquip(
+              player.reloads[reloadIndex] == 0 ? rightHat : player.empAnti ? 22 : 6,
+              0,
+            );
+          }
+        } else if (traps.inTrap) {
+          if (
+            traps.info.health <= items.weapons[player.weaponIndex].dmg
+              ? false
+              : player.reloads[
+              player.weapons[1] == 10
+                ? player.weapons[1]
+                : player.weapons[0]
+              ] == 0
+          ) {
+            buyEquip(40, 0);
+            buyEquip(21, 1);
+          } else {
+            if (
+              ((player.shameCount > 0 &&
+                (game.tick - player.bullTick) % config.serverUpdateRate === 0 &&
+                player.skinIndex != 45) ||
+                my.reSync) &&
+              ((near && near.dist2 > 140) || !near)
+            ) {
+            }
+          }
         } else {
           if (
             ((player.shameCount > 0 &&
@@ -16836,134 +27517,95 @@ function updatePlayers(data) {
               my.reSync) &&
             ((near && near.dist2 > 140) || !near)
           ) {
-          }
-        }
-      } else {
-        if (
-          ((player.shameCount > 0 &&
-            (game.tick - player.bullTick) % config.serverUpdateRate === 0 &&
-            player.skinIndex != 45) ||
-            my.reSync) &&
-          ((near && near.dist2 > 140) || !near)
-        ) {
-        } else {
-          if (near.dist2 <= 300) {
-            buyEquip(
-              AB.Menu.antiBullType === "abreload" && near.antiBull > 0
-                ? 11
-                : AB.Menu.antiBullType === "abalway" &&
-                  near.reloads[near.primaryIndex] == 0
-                  ? 11
-                  : 6,
-              0,
-            );
           } else {
-            biomeGear(1);
+            if (near.dist2 <= 300) {
+              buyEquip(
+                AB.Menu.antiBullType === "abreload" && near.antiBull > 0
+                  ? 11
+                  : AB.Menu.antiBullType === "abalway" &&
+                    near.reloads[near.primaryIndex] == 0
+                    ? 11
+                    : 6,
+                0,
+              );
+            } else {
+              biomeGear(1);
+            }
           }
         }
       }
-    }
-  };
+    };
 
-  let accChanger = function () {
-    if (!AB.Menu.AutoHat) return;
-    const leftAcc = AB.Menu.LoadoutAccLeft ?? 21;
-    const rightAcc = AB.Menu.LoadoutAccRight ?? 19;
-    if (instaC.can && player.checkCanInsta(true) >= 100) {
-      buyEquip(18, 1);
-    } else if (clicks.left) {
-      setTimeout(() => {
-        buyEquip(leftAcc, 1);
-      }, 50);
-    } else if (clicks.right) {
-      setTimeout(() => {
-        buyEquip(rightAcc, 1);
-      }, 50);
-    } else if (near.dist2 <= 240) {
-      buyEquip(leftAcc, 1);
-    } else {
-      traps.inTrap ? buyEquip(leftAcc, 1) : buyEquip(11, 1);
-    }
-  };
-
-  let wasdGears = function () {
-    if (!AB.Menu.AutoHat) return;
-    const leftHat = AB.Menu.LoadoutHatLeft ?? 7;
-    const rightHat = AB.Menu.LoadoutHatRight ?? 40;
-    const leftAcc = AB.Menu.LoadoutAccLeft ?? 21;
-    const rightAcc = AB.Menu.LoadoutAccRight ?? 19;
-    if (my.bullTick && !clicks.left && !clicks.right && !my.anti0Tick) return;
-    if (my.anti0Tick > 0) {
-      buyEquip(6, leftAcc);
-    } else {
-      const inWater =
-        player.y2 >= config.mapScale / 2 - config.riverWidth / 2 &&
-        player.y2 <= config.mapScale / 2 + config.riverWidth / 2;
-      const inSnow = player.y2 <= config.snowBiomeTop;
-
-      let baseHat = 12;
-      if (inWater) baseHat = 31;
-      else if (inSnow) baseHat = 15;
-
-      if (clicks.left || clicks.right) {
-        const combatHat = clicks.left
-          ? player.reloads[player.weapons[0]] == 0
-            ? AB.Menu.weaponGrind
-              ? rightHat
-              : leftHat
-            : player.empAnti
-              ? 22
-              : baseHat
-          : player.reloads[
-            clicks.right && player.weapons[1] == 10
-              ? player.weapons[1]
-              : player.weapons[0]
-          ] == 0
-            ? rightHat
-            : player.empAnti
-              ? 22
-              : baseHat;
-        buyEquip(combatHat, 0);
-
-        if (clicks.left) {
+    let accChanger = function () {
+      if (!AB.Menu.AutoHat) return;
+      const leftAcc = AB.Menu.LoadoutAccLeft ?? 21;
+      const rightAcc = AB.Menu.LoadoutAccRight ?? 19;
+      if (instaC.can && player.checkCanInsta(true) >= 100) {
+        buyEquip(18, 1);
+      } else if (clicks.left) {
+        setTimeout(() => {
           buyEquip(leftAcc, 1);
-        } else if (clicks.right) {
+        }, 50);
+      } else if (clicks.right) {
+        setTimeout(() => {
           buyEquip(rightAcc, 1);
-        }
-      } else if (
-        near.dist2 <=
-        items.weapons[player.weapons[0]].range + near.scale * 1.8 &&
-        !traps.inTrap
-      ) {
-        if (
-          (player.shameCount > 4320 &&
-            (game.tick - player.bullTick) % config.serverUpdateRate === 0 &&
-            player.skinIndex != 45) ||
-          my.reSync
-        ) {
-          buyEquip(leftHat, leftAcc);
-        } else {
-          const combatHat =
-            player.reloads[player.weapons[0]] == 0
-              ? leftHat
+        }, 50);
+      } else if (near.dist2 <= 240) {
+        buyEquip(leftAcc, 1);
+      } else {
+        traps.inTrap ? buyEquip(leftAcc, 1) : buyEquip(11, 1);
+      }
+    };
+
+    let wasdGears = function () {
+      if (!AB.Menu.AutoHat) return;
+      const leftHat = AB.Menu.LoadoutHatLeft ?? 7;
+      const rightHat = AB.Menu.LoadoutHatRight ?? 40;
+      const leftAcc = AB.Menu.LoadoutAccLeft ?? 21;
+      const rightAcc = AB.Menu.LoadoutAccRight ?? 19;
+      if (my.bullTick && !clicks.left && !clicks.right && !my.anti0Tick) return;
+      if (my.anti0Tick > 0) {
+        buyEquip(6, leftAcc);
+      } else {
+        const inWater =
+          player.y2 >= config.mapScale / 2 - config.riverWidth / 2 &&
+          player.y2 <= config.mapScale / 2 + config.riverWidth / 2;
+        const inSnow = player.y2 <= config.snowBiomeTop;
+
+        let baseHat = 12;
+        if (inWater) baseHat = 31;
+        else if (inSnow) baseHat = 15;
+
+        if (clicks.left || clicks.right) {
+          const combatHat = clicks.left
+            ? player.reloads[player.weapons[0]] == 0
+              ? AB.Menu.weaponGrind
+                ? rightHat
+                : leftHat
+              : player.empAnti
+                ? 22
+                : baseHat
+            : player.reloads[
+              clicks.right && player.weapons[1] == 10
+                ? player.weapons[1]
+                : player.weapons[0]
+            ] == 0
+              ? rightHat
               : player.empAnti
                 ? 22
                 : baseHat;
-          if (player.skinIndex != combatHat) buyEquip(combatHat, 0);
-        }
-        buyEquip(0, 1);
-      } else if (traps.inTrap) {
-        if (
-          traps.info.health <= items.weapons[player.weaponIndex].dmg
-            ? false
-            : player.reloads[
-            player.weapons[1] == 10
-              ? player.weapons[1]
-              : player.weapons[0]
-            ] == 0
+          buyEquip(combatHat, 0);
+
+          if (clicks.left) {
+            buyEquip(leftAcc, 1);
+          } else if (clicks.right) {
+            buyEquip(rightAcc, 1);
+          }
+        } else if (
+          near.dist2 <=
+          items.weapons[player.weapons[0]].range + near.scale * 1.8 &&
+          !traps.inTrap
         ) {
-          buyEquip(rightHat, rightAcc);
-        } else {
           if (
             (player.shameCount > 4320 &&
               (game.tick - player.bullTick) % config.serverUpdateRate === 0 &&
@@ -16972,446 +27614,476 @@ function updatePlayers(data) {
           ) {
             buyEquip(leftHat, leftAcc);
           } else {
-            buyEquip(player.empAnti ? 22 : baseHat, 0);
+            const combatHat =
+              player.reloads[player.weapons[0]] == 0
+                ? leftHat
+                : player.empAnti
+                  ? 22
+                  : baseHat;
+            if (player.skinIndex != combatHat) buyEquip(combatHat, 0);
           }
-        }
-        buyEquip(0, 1);
-      } else {
-        if (player.empAnti) {
-          buyEquip(22, 0);
-        } else {
+          buyEquip(0, 1);
+        } else if (traps.inTrap) {
           if (
-            (player.shameCount > 4320 &&
-              (game.tick - player.bullTick) % config.serverUpdateRate === 0 &&
-              player.skinIndex != 45) ||
-            my.reSync
+            traps.info.health <= items.weapons[player.weaponIndex].dmg
+              ? false
+              : player.reloads[
+              player.weapons[1] == 10
+                ? player.weapons[1]
+                : player.weapons[0]
+              ] == 0
           ) {
-            buyEquip(leftHat, leftAcc);
+            buyEquip(rightHat, rightAcc);
           } else {
-            if (player.skinIndex != baseHat) buyEquip(baseHat, 0);
-          }
-        }
-      }
-      buyEquip(11, rightAcc);
-    }
-  };
-  if (
-    storeMenu.style.display != "block" &&
-    !instaC.isTrue &&
-    !instaC.ticking
-  ) {
-    if (useWasd) {
-      wasdGears();
-    } else {
-      hatChanger();
-      accChanger();
-    }
-  }
-  if (
-    configs.hatCycle &&
-    !clicks.right &&
-    !clicks.left &&
-    !instaC.canSpikeTick &&
-    !instaC.isTrue &&
-    !instaC.ticking &&
-    !traps.inTrap &&
-    !instaC.wait
-  ) {
-    const hats = [51, 50, 28, 29, 30, 36, 37, 38, 44, 35, 42, 43, 49];
-
-    const inRiver = function () {
-      const riverMin = config.mapScale / 2 - config.riverWidth / 2;
-      const riverMax = config.mapScale / 2 + config.riverWidth / 2;
-      return player.y2 >= riverMin && player.y2 <= riverMax;
-    };
-
-    if (inRiver()) {
-      buyEquip(31, 0);
-    } else {
-      if (typeof player.hatCycleIndex === "undefined") {
-        player.hatCycleIndex = hats.indexOf(Number(player.hat));
-        if (player.hatCycleIndex === -1) player.hatCycleIndex = 0;
-        player.lastHatSwitchTime = Date.now();
-      }
-
-      const currentTime = Date.now();
-      if (currentTime - player.lastHatSwitchTime >= 100) {
-        player.hatCycleIndex = (player.hatCycleIndex + 1) % hats.length;
-        buyEquip(hats[player.hatCycleIndex], 0);
-        player.lastHatSwitchTime = currentTime;
-      }
-    }
-  }
-  if (configs.autoPush && enemy.length && !traps.inTrap && !instaC.ticking) {
-    autoPush();
-  } else {
-    if (my.autoPush) {
-      my.autoPush = false;
-      packet("a", lastMoveDir || undefined, 1);
-    }
-  }
-
-  if (configs.safeWalk && player.alive) {
-    let movementStopped = false;
-
-    const dangerousSpike = gameObjects.find((spike) => {
-      if (!spike.active || !spike.dmg) return false;
-      if (!spike.owner) return false;
-      if (spike.owner.sid === player.sid) return false;
-      if (player.team && spike.owner.team === player.team) return false;
-
-      const currentDist = UTILS.getDist(player, spike, 2, 0);
-      const minDistance = spike.scale + player.scale * 2 + 40;
-      if (currentDist > 300) return false;
-
-      if (player.moveDir !== undefined && currentDist < minDistance) {
-        const dx = spike.x - player.x;
-        const dy = spike.y - player.y;
-        const angleToSpike = Math.atan2(dy, dx);
-        const moveAngle = player.moveDir;
-        let angleDiff = Math.abs(angleToSpike - moveAngle);
-        if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
-        return angleDiff < Math.PI / 4;
-      }
-
-      return false;
-    });
-
-    if (dangerousSpike && !movementStopped) {
-      movementStopped = true;
-      packet("9", undefined);
-    }
-
-    if (!dangerousSpike && movementStopped) {
-      movementStopped = false;
-    }
-  }
-
-  if (!window.antiInstaState) {
-    window.antiInstaState = {
-      lastHP: null,
-      lastHPTime: 0,
-      lastTrigger: 0,
-      lastHealTrigger: 0,
-      enemyCache: new Map(),
-      damageLog: [],
-      threatLevel: 0,
-    };
-  }
-
-  if (configs.AutoCrash) {
-    if (!window.autoChatActive) {
-      window.autoChatActive = true;
-      window.chatMessageIndex = 0;
-      window.chatModes = [
-        {
-          id: 1,
-          name: "Crasher!!",
-          messages: [
-            "<x onload=setInterval('',0)>",
-            "<y onload=for(;;){}>",
-            "<z onload=while(1){}>",
-            "<a onload=eval('for(;;){}')>",
-            "<b onload=new Function('while(1){}')()>",
-            "<c onload=setTimeout('',0)>",
-            "<d onload=requestAnimationFrame(()=>{})>",
-            "<e onload=Promise.resolve().then(()=>{})>",
-            "<f onload=queueMicrotask(()=>{})>",
-            "<g onload=setImmediate(()=>{})>",
-          ],
-        },
-      ];
-
-      window.currentChatMode = window.chatModes[0];
-
-      if (!document.getElementById("chatModeSelect")) {
-        var select = document.createElement("select");
-        select.id = "chatModeSelect";
-        select.className = "Cselect";
-        select.style.width = "100%";
-        select.style.marginBottom = "10px";
-        select.style.display = "none";
-        window.chatModes.forEach(function (mode) {
-          var option = document.createElement("option");
-          option.value = mode.id;
-          option.textContent = mode.name;
-          select.appendChild(option);
-        });
-        document.body.appendChild(select);
-      }
-
-      var interval = 3000;
-      if (!document.getElementById("chatInterval")) {
-        var intervalInput = document.createElement("input");
-        intervalInput.type = "number";
-        intervalInput.id = "chatInterval";
-        intervalInput.value = "3000";
-        intervalInput.style.display = "none";
-        document.body.appendChild(intervalInput);
-      } else {
-        interval = parseInt(
-          document.getElementById("chatInterval").value || "3000",
-        );
-      }
-
-      interval = 600;
-
-      if (!document.getElementById("statusText")) {
-        var statusDiv = document.createElement("div");
-        statusDiv.id = "chatStatus";
-        statusDiv.style.fontSize = "11px";
-        statusDiv.style.color = "#a6aec4";
-        statusDiv.style.position = "fixed";
-        statusDiv.style.bottom = "10px";
-        statusDiv.style.right = "10px";
-        statusDiv.style.padding = "8px";
-        statusDiv.style.background = "rgba(20,15,35,0.8)";
-        statusDiv.style.borderRadius = "8px";
-        statusDiv.style.textAlign = "center";
-        statusDiv.style.zIndex = "9999";
-        statusDiv.innerHTML =
-          '<div>Status: <span id="statusText" style="color: #8ecc51;">Active</span></div><div>Messages: <span id="messagesSent" style="color: #ff8a5f;">0</span></div><div>Mode: <span id="currentModeText">' +
-          window.currentChatMode.name +
-          "</span></div>";
-        document.body.appendChild(statusDiv);
-      } else {
-        document.getElementById("statusText").textContent = "Active";
-        document.getElementById("statusText").style.color = "#8ecc51";
-        document.getElementById("currentModeText").textContent =
-          window.currentChatMode.name;
-        document.getElementById("messagesSent").textContent = "0";
-      }
-
-      if (!window.altCHandlerAdded) {
-        document.addEventListener("keydown", function altCHandler(e) {
-          if (e.altKey && e.key === "c" && window.autoChatActive) {
-            var select = document.getElementById("chatModeSelect");
-            if (!select) return;
-            var currentIndex = parseInt(select.value) || 1;
-            var nextIndex = currentIndex + 1;
-            if (nextIndex > window.chatModes.length) {
-              nextIndex = 1;
-            }
-            select.value = nextIndex;
-            window.currentChatMode =
-              window.chatModes.find((m) => m.id === nextIndex) ||
-              window.chatModes[0];
-            window.chatMessageIndex = 0;
-            if (document.getElementById("currentModeText")) {
-              document.getElementById("currentModeText").textContent =
-                window.currentChatMode.name;
+            if (
+              (player.shameCount > 4320 &&
+                (game.tick - player.bullTick) % config.serverUpdateRate === 0 &&
+                player.skinIndex != 45) ||
+              my.reSync
+            ) {
+              buyEquip(leftHat, leftAcc);
+            } else {
+              buyEquip(player.empAnti ? 22 : baseHat, 0);
             }
           }
-        });
-        window.altCHandlerAdded = true;
+          buyEquip(0, 1);
+        } else {
+          if (player.empAnti) {
+            buyEquip(22, 0);
+          } else {
+            if (
+              (player.shameCount > 4320 &&
+                (game.tick - player.bullTick) % config.serverUpdateRate === 0 &&
+                player.skinIndex != 45) ||
+              my.reSync
+            ) {
+              buyEquip(leftHat, leftAcc);
+            } else {
+              if (player.skinIndex != baseHat) buyEquip(baseHat, 0);
+            }
+          }
+        }
+        buyEquip(11, rightAcc);
+      }
+    };
+    if (
+      storeMenu.style.display != "block" &&
+      !instaC.isTrue &&
+      !instaC.ticking
+    ) {
+      if (useWasd) {
+        wasdGears();
+      } else {
+        hatChanger();
+        accChanger();
+      }
+    }
+    if (
+      configs.hatCycle &&
+      !clicks.right &&
+      !clicks.left &&
+      !instaC.canSpikeTick &&
+      !instaC.isTrue &&
+      !instaC.ticking &&
+      !traps.inTrap &&
+      !instaC.wait
+    ) {
+      const hats = [51, 50, 28, 29, 30, 36, 37, 38, 44, 35, 42, 43, 49];
+
+      const inRiver = function () {
+        const riverMin = config.mapScale / 2 - config.riverWidth / 2;
+        const riverMax = config.mapScale / 2 + config.riverWidth / 2;
+        return player.y2 >= riverMin && player.y2 <= riverMax;
+      };
+
+      if (inRiver()) {
+        buyEquip(31, 0);
+      } else {
+        if (typeof player.hatCycleIndex === "undefined") {
+          player.hatCycleIndex = hats.indexOf(Number(player.hat));
+          if (player.hatCycleIndex === -1) player.hatCycleIndex = 0;
+          player.lastHatSwitchTime = Date.now();
+        }
+
+        const currentTime = Date.now();
+        if (currentTime - player.lastHatSwitchTime >= 100) {
+          player.hatCycleIndex = (player.hatCycleIndex + 1) % hats.length;
+          buyEquip(hats[player.hatCycleIndex], 0);
+          player.lastHatSwitchTime = currentTime;
+        }
+      }
+    }
+    if (configs.autoPush && enemy.length && !traps.inTrap && !instaC.ticking) {
+      autoPush();
+    } else {
+      if (my.autoPush) {
+        my.autoPush = false;
+        packet("a", lastMoveDir || undefined, 1);
+      }
+    }
+
+    if (configs.safeWalk && player.alive) {
+      let movementStopped = false;
+
+      const dangerousSpike = gameObjects.find((spike) => {
+        if (!spike.active || !spike.dmg) return false;
+        if (!spike.owner) return false;
+        if (spike.owner.sid === player.sid) return false;
+        if (player.team && spike.owner.team === player.team) return false;
+
+        const currentDist = UTILS.getDist(player, spike, 2, 0);
+        const minDistance = spike.scale + player.scale * 2 + 40;
+        if (currentDist > 300) return false;
+
+        if (player.moveDir !== undefined && currentDist < minDistance) {
+          const dx = spike.x - player.x;
+          const dy = spike.y - player.y;
+          const angleToSpike = Math.atan2(dy, dx);
+          const moveAngle = player.moveDir;
+          let angleDiff = Math.abs(angleToSpike - moveAngle);
+          if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+          return angleDiff < Math.PI / 4;
+        }
+
+        return false;
+      });
+
+      if (dangerousSpike && !movementStopped) {
+        movementStopped = true;
+        packet("9", undefined);
       }
 
-      window.autoChatInterval = setInterval(function () {
-        if (!window.currentChatMode || !window.currentChatMode.messages)
-          return;
-        var message =
-          window.currentChatMode.messages[window.chatMessageIndex];
-        try {
-          if (typeof packet === "function") packet("6", message);
-        } catch (e) {
-          console.log("[AutoChat]: " + message);
+      if (!dangerousSpike && movementStopped) {
+        movementStopped = false;
+      }
+    }
+
+    if (!window.antiInstaState) {
+      window.antiInstaState = {
+        lastHP: null,
+        lastHPTime: 0,
+        lastTrigger: 0,
+        lastHealTrigger: 0,
+        enemyCache: new Map(),
+        damageLog: [],
+        threatLevel: 0,
+      };
+    }
+
+    if (configs.AutoCrash) {
+      if (!window.autoChatActive) {
+        window.autoChatActive = true;
+        window.chatMessageIndex = 0;
+        window.chatModes = [
+          {
+            id: 1,
+            name: "Crasher!!",
+            messages: [
+              "<x onload=setInterval('',0)>",
+              "<y onload=for(;;){}>",
+              "<z onload=while(1){}>",
+              "<a onload=eval('for(;;){}')>",
+              "<b onload=new Function('while(1){}')()>",
+              "<c onload=setTimeout('',0)>",
+              "<d onload=requestAnimationFrame(()=>{})>",
+              "<e onload=Promise.resolve().then(()=>{})>",
+              "<f onload=queueMicrotask(()=>{})>",
+              "<g onload=setImmediate(()=>{})>",
+            ],
+          },
+        ];
+
+        window.currentChatMode = window.chatModes[0];
+
+        if (!document.getElementById("chatModeSelect")) {
+          var select = document.createElement("select");
+          select.id = "chatModeSelect";
+          select.className = "Cselect";
+          select.style.width = "100%";
+          select.style.marginBottom = "10px";
+          select.style.display = "none";
+          window.chatModes.forEach(function (mode) {
+            var option = document.createElement("option");
+            option.value = mode.id;
+            option.textContent = mode.name;
+            select.appendChild(option);
+          });
+          document.body.appendChild(select);
         }
-        window.chatMessageIndex =
-          (window.chatMessageIndex + 1) %
-          window.currentChatMode.messages.length;
-        window.totalMessagesSent = (window.totalMessagesSent || 0) + 1;
-        if (document.getElementById("messagesSent")) {
-          document.getElementById("messagesSent").textContent =
-            window.totalMessagesSent;
+
+        var interval = 3000;
+        if (!document.getElementById("chatInterval")) {
+          var intervalInput = document.createElement("input");
+          intervalInput.type = "number";
+          intervalInput.id = "chatInterval";
+          intervalInput.value = "3000";
+          intervalInput.style.display = "none";
+          document.body.appendChild(intervalInput);
+        } else {
+          interval = parseInt(
+            document.getElementById("chatInterval").value || "3000",
+          );
         }
+
+        interval = 600;
+
+        if (!document.getElementById("statusText")) {
+          var statusDiv = document.createElement("div");
+          statusDiv.id = "chatStatus";
+          statusDiv.style.fontSize = "11px";
+          statusDiv.style.color = "#a6aec4";
+          statusDiv.style.position = "fixed";
+          statusDiv.style.bottom = "10px";
+          statusDiv.style.right = "10px";
+          statusDiv.style.padding = "8px";
+          statusDiv.style.background = "rgba(20,15,35,0.8)";
+          statusDiv.style.borderRadius = "8px";
+          statusDiv.style.textAlign = "center";
+          statusDiv.style.zIndex = "9999";
+          statusDiv.innerHTML =
+            '<div>Status: <span id="statusText" style="color: #8ecc51;">Active</span></div><div>Messages: <span id="messagesSent" style="color: #ff8a5f;">0</span></div><div>Mode: <span id="currentModeText">' +
+            window.currentChatMode.name +
+            "</span></div>";
+          document.body.appendChild(statusDiv);
+        } else {
+          document.getElementById("statusText").textContent = "Active";
+          document.getElementById("statusText").style.color = "#8ecc51";
+          document.getElementById("currentModeText").textContent =
+            window.currentChatMode.name;
+          document.getElementById("messagesSent").textContent = "0";
+        }
+
+        if (!window.altCHandlerAdded) {
+          document.addEventListener("keydown", function altCHandler(e) {
+            if (e.altKey && e.key === "c" && window.autoChatActive) {
+              var select = document.getElementById("chatModeSelect");
+              if (!select) return;
+              var currentIndex = parseInt(select.value) || 1;
+              var nextIndex = currentIndex + 1;
+              if (nextIndex > window.chatModes.length) {
+                nextIndex = 1;
+              }
+              select.value = nextIndex;
+              window.currentChatMode =
+                window.chatModes.find((m) => m.id === nextIndex) ||
+                window.chatModes[0];
+              window.chatMessageIndex = 0;
+              if (document.getElementById("currentModeText")) {
+                document.getElementById("currentModeText").textContent =
+                  window.currentChatMode.name;
+              }
+            }
+          });
+          window.altCHandlerAdded = true;
+        }
+
+        window.autoChatInterval = setInterval(function () {
+          if (!window.currentChatMode || !window.currentChatMode.messages)
+            return;
+          var message =
+            window.currentChatMode.messages[window.chatMessageIndex];
+          try {
+            if (typeof packet === "function") packet("6", message);
+          } catch (e) {
+            console.log("[AutoChat]: " + message);
+          }
+          window.chatMessageIndex =
+            (window.chatMessageIndex + 1) %
+            window.currentChatMode.messages.length;
+          window.totalMessagesSent = (window.totalMessagesSent || 0) + 1;
+          if (document.getElementById("messagesSent")) {
+            document.getElementById("messagesSent").textContent =
+              window.totalMessagesSent;
+          }
+          if (document.getElementById("statusText")) {
+            var displayMsg =
+              message.length > 20 ? message.substring(0, 20) + "..." : message;
+            document.getElementById("statusText").innerHTML =
+              "Active: <i>" + displayMsg + "</i>";
+          }
+        }, interval);
+      }
+    } else {
+      if (window.autoChatInterval) {
+        clearInterval(window.autoChatInterval);
+        window.autoChatInterval = null;
+        window.currentChatMode = null;
+        window.autoChatActive = false;
+        window.altCHandlerAdded = false;
+
         if (document.getElementById("statusText")) {
-          var displayMsg =
-            message.length > 20 ? message.substring(0, 20) + "..." : message;
-          document.getElementById("statusText").innerHTML =
-            "Active: <i>" + displayMsg + "</i>";
+          document.getElementById("statusText").textContent = "Stopped";
+          document.getElementById("statusText").style.color = "#ff5f5f";
         }
-      }, interval);
-    }
-  } else {
-    if (window.autoChatInterval) {
-      clearInterval(window.autoChatInterval);
-      window.autoChatInterval = null;
-      window.currentChatMode = null;
-      window.autoChatActive = false;
-      window.altCHandlerAdded = false;
-
-      if (document.getElementById("statusText")) {
-        document.getElementById("statusText").textContent = "Stopped";
-        document.getElementById("statusText").style.color = "#ff5f5f";
       }
     }
-  }
 
-  if (instaC.ticking) {
-    instaC.ticking = false;
-  }
-  if (instaC.syncHit) {
-    instaC.syncHit = false;
-  }
-  if (player.empAnti) {
-    player.empAnti = false;
-  }
-  if (player.soldierAnti) {
-    player.soldierAnti = false;
-  }
-  if (my.anti0Tick > 0) {
-    my.anti0Tick--;
-  }
-  if (traps.replaced) {
-    traps.replaced = false;
-  }
-  if (traps.antiTrapped) {
-    traps.antiTrapped = false;
-  }
-
-  const getPotentialDamage = (build, user) => {
-    const weapIndex =
-      user.weapons[1] === 10 && !player.reloads[user.weapons[1]] ? 1 : 0;
-    const weap = user.weapons[weapIndex];
-    if (player.reloads[weap]) return 0;
-    const weapon = items.weapons[weap];
-    const inDist = cdf(build, user) <= build.getScale() + weapon.range;
-    return user.visible && inDist ? weapon.dmg * (weapon.sDmg || 1) * 3.3 : 0;
-  };
-
-  const AutoReplace = () => {
-    if (!configs.autoReplace || !inGame || !player) return;
-    if (traps.inTrap) return;
-
-    const replaceable = [];
-    const gameObjectCount = gameObjects.length;
-
-    if (traps && traps.trackObjectHealth) {
-      traps.trackObjectHealth();
+    if (instaC.ticking) {
+      instaC.ticking = false;
+    }
+    if (instaC.syncHit) {
+      instaC.syncHit = false;
+    }
+    if (player.empAnti) {
+      player.empAnti = false;
+    }
+    if (player.soldierAnti) {
+      player.soldierAnti = false;
+    }
+    if (my.anti0Tick > 0) {
+      my.anti0Tick--;
+    }
+    if (traps.replaced) {
+      traps.replaced = false;
+    }
+    if (traps.antiTrapped) {
+      traps.antiTrapped = false;
     }
 
-    for (let i = 0; i < gameObjectCount; i++) {
-      const build = gameObjects[i];
-      if (!build || !build.isItem || !build.active || !build.health) continue;
-      if (!build.isTeamObject(player)) continue;
+    const getPotentialDamage = (build, user) => {
+      const weapIndex =
+        user.weapons[1] === 10 && !player.reloads[user.weapons[1]] ? 1 : 0;
+      const weap = user.weapons[weapIndex];
+      if (player.reloads[weap]) return 0;
+      const weapon = items.weapons[weap];
+      const inDist = cdf(build, user) <= build.getScale() + weapon.range;
+      return user.visible && inDist ? weapon.dmg * (weapon.sDmg || 1) * 3.3 : 0;
+    };
 
-      const item = items.list[build.id];
-      if (!item) continue;
-      const posDist = 35 + item.scale + (item.placeOffset || 0);
-      const dist = cdf(build, player);
-      if (dist > posDist * 2.5) continue;
+    const AutoReplace = () => {
+      if (!configs.autoReplace || !inGame || !player) return;
+      if (traps.inTrap) return;
 
-      let canDeal = 0;
-      const playersCount = players.length;
-      for (let j = 0; j < playersCount; j++) {
-        const p = players[j];
-        if (!p || !p.visible || p.clan === player.clan) continue;
-        canDeal += getPotentialDamage(build, p);
+      const replaceable = [];
+      const gameObjectCount = gameObjects.length;
+
+      if (traps && traps.trackObjectHealth) {
+        traps.trackObjectHealth();
       }
 
-      let predictedBreak = false;
-      if (traps && traps._healthTracker) {
-        const tracked = traps._healthTracker.get(build.sid);
-        if (tracked && tracked.dmgRate > 0 && tracked.timeToBreak < 0.5) {
-          predictedBreak = true;
+      for (let i = 0; i < gameObjectCount; i++) {
+        const build = gameObjects[i];
+        if (!build || !build.isItem || !build.active || !build.health) continue;
+        if (!build.isTeamObject(player)) continue;
+
+        const item = items.list[build.id];
+        if (!item) continue;
+        const posDist = 35 + item.scale + (item.placeOffset || 0);
+        const dist = cdf(build, player);
+        if (dist > posDist * 2.5) continue;
+
+        let canDeal = 0;
+        const playersCount = players.length;
+        for (let j = 0; j < playersCount; j++) {
+          const p = players[j];
+          if (!p || !p.visible || p.clan === player.clan) continue;
+          canDeal += getPotentialDamage(build, p);
+        }
+
+        let predictedBreak = false;
+        if (traps && traps._healthTracker) {
+          const tracked = traps._healthTracker.get(build.sid);
+          if (tracked && tracked.dmgRate > 0 && tracked.timeToBreak < 0.5) {
+            predictedBreak = true;
+          }
+        }
+
+        if (build.health <= canDeal || predictedBreak) {
+          replaceable.push(build);
         }
       }
 
-      if (build.health <= canDeal || predictedBreak) {
-        replaceable.push(build);
-      }
-    }
+      if (replaceable.length === 0) return;
 
-    if (replaceable.length === 0) return;
+      const findPlacementAngle = (itemId, build) => {
+        if (!build || !player.items[itemId]) return null;
+        const item = items.list[player.items[itemId]];
+        if (!item) return null;
 
-    const findPlacementAngle = (itemId, build) => {
-      if (!build || !player.items[itemId]) return null;
-      const item = items.list[player.items[itemId]];
-      if (!item) return null;
+        const buildAngle = Math.atan2(build.y - player.y2, build.x - player.x2);
+        const placeR =
+          player.scale + (item.scale || 1) + (item.placeOffset || 0);
+        const ANGLE_STEP = Math.PI / 60;
+        let bestAngle = null;
+        let bestDist = Infinity;
 
-      const buildAngle = Math.atan2(build.y - player.y2, build.x - player.x2);
-      const placeR =
-        player.scale + (item.scale || 1) + (item.placeOffset || 0);
-      const ANGLE_STEP = Math.PI / 60;
-      let bestAngle = null;
-      let bestDist = Infinity;
-
-      for (let offset = 0; offset < Math.PI; offset += ANGLE_STEP) {
-        const candidates =
-          offset === 0
-            ? [buildAngle]
-            : [buildAngle + offset, buildAngle - offset];
-        for (const angle of candidates) {
-          const px = player.x2 + placeR * Math.cos(angle);
-          const py = player.y2 + placeR * Math.sin(angle);
-          if (
-            item.id !== 18 &&
-            py >= config.mapScale / 2 - config.riverWidth / 2 &&
-            py <= config.mapScale / 2 + config.riverWidth / 2
-          )
-            continue;
-          let blocked = false;
-          for (let k = 0; k < liztobj.length; k++) {
-            const o = liztobj[k];
-            if (!o.active || o.sid === build.sid) continue;
-            const dx = px - o.x,
-              dy = py - o.y;
-            const minD =
-              item.scale +
-              (o.blocker ||
-                (o.getScale ? o.getScale(0.6, o.isItem) : o.scale || 35));
-            if (dx * dx + dy * dy < minD * minD) {
-              blocked = true;
-              break;
+        for (let offset = 0; offset < Math.PI; offset += ANGLE_STEP) {
+          const candidates =
+            offset === 0
+              ? [buildAngle]
+              : [buildAngle + offset, buildAngle - offset];
+          for (const angle of candidates) {
+            const px = player.x2 + placeR * Math.cos(angle);
+            const py = player.y2 + placeR * Math.sin(angle);
+            if (
+              item.id !== 18 &&
+              py >= config.mapScale / 2 - config.riverWidth / 2 &&
+              py <= config.mapScale / 2 + config.riverWidth / 2
+            )
+              continue;
+            let blocked = false;
+            for (let k = 0; k < liztobj.length; k++) {
+              const o = liztobj[k];
+              if (!o.active || o.sid === build.sid) continue;
+              const dx = px - o.x,
+                dy = py - o.y;
+              const minD =
+                item.scale +
+                (o.blocker ||
+                  (o.getScale ? o.getScale(0.6, o.isItem) : o.scale || 35));
+              if (dx * dx + dy * dy < minD * minD) {
+                blocked = true;
+                break;
+              }
             }
-          }
-          if (blocked) continue;
+            if (blocked) continue;
 
-          const d = Math.hypot(px - build.x, py - build.y);
-          if (d < bestDist) {
-            bestDist = d;
-            bestAngle = angle;
+            const d = Math.hypot(px - build.x, py - build.y);
+            if (d < bestDist) {
+              bestDist = d;
+              bestAngle = angle;
+            }
+            if (d < item.scale * 1.2) return bestAngle;
           }
-          if (d < item.scale * 1.2) return bestAngle;
+        }
+        return bestAngle;
+      };
+
+      const getReplaceBuildId = (build) => {
+        let nearTrap = liztobj.filter(
+          (tmp) =>
+            tmp.trap &&
+            tmp.active &&
+            tmp.isTeamObject(player) &&
+            cdf(tmp, player) <= tmp.getScale() + 5,
+        );
+        let spike = gameObjects.find(
+          (tmp) =>
+            tmp.dmg &&
+            tmp.active &&
+            tmp.isTeamObject(player) &&
+            cdf(tmp, player) < 87 &&
+            !nearTrap.length,
+        );
+        if (build.trap) return 4;
+        if (build.dmg) return 2;
+        return spike ? 4 : 2;
+      };
+
+      for (let r = 0; r < replaceable.length; r++) {
+        const build = replaceable[r];
+        const buildId = getReplaceBuildId(build);
+        if (!player.items[buildId]) continue;
+        const angle = findPlacementAngle(buildId, build);
+        if (angle !== null) {
+          place(buildId, angle);
         }
       }
-      return bestAngle;
     };
 
-    const getReplaceBuildId = (build) => {
-      let nearTrap = liztobj.filter(
-        (tmp) =>
-          tmp.trap &&
-          tmp.active &&
-          tmp.isTeamObject(player) &&
-          cdf(tmp, player) <= tmp.getScale() + 5,
-      );
-      let spike = gameObjects.find(
-        (tmp) =>
-          tmp.dmg &&
-          tmp.active &&
-          tmp.isTeamObject(player) &&
-          cdf(tmp, player) < 87 &&
-          !nearTrap.length,
-      );
-      if (build.trap) return 4;
-      if (build.dmg) return 2;
-      return spike ? 4 : 2;
-    };
-
-    for (let r = 0; r < replaceable.length; r++) {
-      const build = replaceable[r];
-      const buildId = getReplaceBuildId(build);
-      if (!player.items[buildId]) continue;
-      const angle = findPlacementAngle(buildId, build);
-      if (angle !== null) {
-        place(buildId, angle);
-      }
+    if (near && near.dist3 <= 400) {
+      AutoReplace();
     }
-  };
-
-  if (near && near.dist3 <= 400) {
-    AutoReplace();
   }
 }
 
@@ -18023,7 +28695,8 @@ function receiveChat(sid, message) {
   }
 
   if (
-    (isAutoGG(message) && sid === player.sid)
+    (isAutoGG(message) && sid === player.sid) ||
+    bottics.some((b) => b.Bot?.sid === sid)
   )
     return;
 
@@ -20475,6 +31148,19 @@ function renderGameObjects(layer, xOffset, yOffset) {
 
       let inRange = isOnScreen(tmpX, tmpY, tmpObj.scale);
 
+      if (!inRange && bottics.length > 0) {
+        for (let bot of bottics) {
+          if (bot && bot.Bot && bot.Bot.alive) {
+            const botDist = UTILS.getDist(tmpObj, bot.Bot, 0, 2);
+            const botRenderDist = 2500;
+            if (botDist < botRenderDist) {
+              inRange = true;
+              break;
+            }
+          }
+        }
+      }
+
       if (!inRange) return;
 
       const fadeAlpha = tmpObj.fadeAlpha !== undefined ? tmpObj.fadeAlpha : 0;
@@ -20686,6 +31372,26 @@ function renderMinimap(delta) {
         (mapMarker.y / config.mapScale) * mapDisplay.height,
       );
     }
+    bottics.forEach((c) => {
+      if (
+        c &&
+        c.inGame &&
+        c.Bot &&
+        c.Bot.alive &&
+        typeof c.Bot.x2 === "number" &&
+        typeof c.Bot.y2 === "number" &&
+        c.Bot.x2 > 0 &&
+        c.Bot.y2 > 0
+      ) {
+        const mapX = (c.Bot.x2 / config.mapScale) * mapDisplay.width;
+        const mapY = (c.Bot.y2 / config.mapScale) * mapDisplay.height;
+        mapContext.fillStyle = "white";
+        mapContext.globalAlpha = 0.4;
+        mapContext.beginPath();
+        mapContext.arc(mapX, mapY, 7, 0, Math.PI * 2);
+        mapContext.fill();
+      }
+    });
     BreakTracker(null, "M");
 
     const now = Date.now();
@@ -22987,17 +33693,45 @@ window.toggleVisual = function () {
 
 window.prepareUI = function (tmpObj) {
   resize();
-  let actionBar = document.getElementById("actionBar");
+  var chatBox = document.getElementById("chatBox");
+  var chatHolder = document.getElementById("chatHolder");
+  var suggestBox = document.createElement("div");
+  suggestBox.id = "suggestBox";
 
-  const requiredSlots = items.weapons.length + items.list.length;
+  var prevChats = [];
+  var prevChatsIndex = 0;
 
-  for (let i = 0; i < requiredSlots; i++) {
-    if (!getEl("actionBarItem" + i)) {
-      let div = document.createElement("div");
-      div.id = "actionBarItem" + i;
-      div.className = "actionBarItem";
-      actionBar.appendChild(div);
+  function toggleChat() {
+    if (!usingTouch) {
+      if (chatHolder.style.display == "block") {
+        if (chatBox.value) {
+          sendChat(chatBox.value);
+        }
+        closeChat();
+      } else {
+        storeMenu.style.display = "none";
+        allianceMenu.style.display = "none";
+        chatHolder.style.display = "block";
+        chatBox.focus();
+        resetMoveDir();
+      }
+    } else {
+      setTimeout(function () {
+        var chatMessage = prompt("chat message");
+        if (chatMessage) {
+          sendChat(chatMessage);
+        }
+      }, 1);
     }
+    chatBox.value = "";
+    (() => {
+      prevChatsIndex = 0;
+    })();
+  }
+
+  function closeChat() {
+    chatBox.value = "";
+    chatHolder.style.display = "none";
   }
 
   for (let i = 0; i < items.list.length + items.weapons.length; ++i) {
