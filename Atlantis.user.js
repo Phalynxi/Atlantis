@@ -8197,11 +8197,13 @@
             nearestEnemy.reload[0].current &&
             myPlayer.currentHealth <= totalDamage &&
             myPlayer.currentHealth > totalDamage * 0.75),
-        { reloading: reloading } = ModuleHandler.staticModules;
-      if (
-        ((ModuleHandler.forceWeapon = type),
-          reloading.isReloaded(type) && !shouldIgnore)
-      ) {
+        { reloading: reloading } = ModuleHandler.staticModules,
+        isReloaded = reloading.isReloaded(type) && !shouldIgnore;
+      
+      // Equip tank when reloaded, soldier when not
+      ModuleHandler.forceHat = isReloaded ? 40 : 11;
+      
+      if (isReloaded) {
         if (
           ((ModuleHandler.moduleActive = !0),
             (ModuleHandler.useAngle = angle),
@@ -10850,10 +10852,67 @@
       let pos0 = myPlayer.pos.current,
         trapPos = nearestTrap.pos.current,
         enemyPos = nearestEnemy.pos.current,
-        oppositeAngle = trapPos.angle(enemyPos) + Math.PI,
-        orbitRadius = nearestTrap.placementScale + myPlayer.scale + 35,
-        targetPos = trapPos.addDirection(oppositeAngle, orbitRadius),
-        moveAngle = SharedPathPlanner.getPathAngle(this.client, pos0, targetPos, myPlayer.scale);
+        orbitSpin = Math.sin(ModuleHandler.tickCount * 0.18) * (Math.PI / 2.4),
+        targetPos;
+
+      // Avoid enemy spikes
+      let enemySpikes = [];
+      for (let [, object] of ObjectManager2.objects) {
+        if (!(object instanceof PlayerObject) || object.type !== 15) continue;
+        if (this.client.PlayerManager.isEnemyByID(object.ownerID, myPlayer)) {
+          enemySpikes.push(object);
+        }
+      }
+
+      // Check if targetPos would walk into spikes, adjust if needed
+      let checkPos = trapPos.addDirection(
+        enemyPos.angle(trapPos) + Math.PI + orbitSpin,
+        nearestEnemy.scale + myPlayer.scale + 85
+      );
+      for (let spike of enemySpikes) {
+        if (checkPos.distance(spike.pos.current) < myPlayer.scale + spike.placementScale + 20) {
+          // Spike detected on path, adjust to go around
+          let angleToSpike = pos0.angle(spike.pos.current);
+          let safeOffset = angleToSpike + (Math.random() > 0.5 ? Math.PI / 2 : -Math.PI / 2);
+          checkPos = checkPos.addDirection(safeOffset, 60);
+        }
+      }
+      targetPos = checkPos;
+
+      if (nearestEnemy.isTrapped && nearestEnemy.trappedIn === nearestTrap) {
+        let trapEnemyAngle = trapPos.angle(enemyPos),
+          orbitAngle = trapEnemyAngle + orbitSpin,
+          orbitRadius = nearestTrap.placementScale + myPlayer.scale + 24;
+        targetPos = trapPos.addDirection(orbitAngle, orbitRadius);
+      } else {
+        let baseAngle = enemyPos.angle(trapPos),
+          orbitAngle = baseAngle + Math.PI + orbitSpin,
+          orbitRadius = nearestEnemy.scale + myPlayer.scale + 85;
+        targetPos = enemyPos.addDirection(orbitAngle, orbitRadius);
+        if (!ModuleHandler.placedOnce && myPlayer.canPlace(7)) {
+          let trapID = myPlayer.getItemByType(7),
+            trapAngles = ObjectManager2.getBestPlacementAngles({
+              position: pos0,
+              id: trapID,
+              targetAngle: pos0.angle(enemyPos),
+              ignoreID: null,
+              preplace: !1,
+              reduce: !0,
+              fill: !0,
+            }).slice(0, 2);
+          if (trapAngles.length) {
+            let angle = trapAngles[0],
+              newPos = pos0.addDirection(angle, myPlayer.getItemPlaceScale(trapID));
+            if (newPos.distance(enemyPos) <= nearestEnemy.scale + Items[trapID].scale + 26) {
+              ModuleHandler.place(7, angle);
+              ModuleHandler.placeAngles[0] = 7;
+              ModuleHandler.placeAngles[1].push(angle);
+              ModuleHandler.placedOnce = !0;
+            }
+          }
+        }
+      }
+      let moveAngle = SharedPathPlanner.getPathAngle(this.client, pos0, targetPos, myPlayer.scale);
       ModuleHandler.moveTo = moveAngle;
       ModuleHandler.currentAngle = pos0.angle(enemyPos);
     }
