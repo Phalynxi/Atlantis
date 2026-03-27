@@ -1,0 +1,376 @@
+// ==UserScript==
+// @name         Nexus client
+// @version      1
+// @description  n -r for autoreplace
+// @author       Pulsar
+// @match        *://*.moomoo.io/*
+// @match        *://*.ondigitalocean.app/*
+// @icon         https://i.etsystatic.com/22609814/c/1295/1029/282/33/il/d89125/3547110597/il_340x270.3547110597_o1zb.jpg
+// @grant        none
+// @run-at       document-start
+// @require      https://greasyfork.org/scripts/423602-msgpack/code/msgpack.js?version=1005014
+// ==/UserScript==
+
+/* eslint strict: ["error"] */
+
+/* Reload bundle */
+const grid_change_ampl = 2;
+let item;
+const boughtHats = [];
+class GammaAPI {
+    packets = 0;
+    dead = false;
+    taskRunning = false;
+    events = [];
+    nextTick = 111;
+    speeds = [300, 400, 400, 300, 300, 700, 300, 100, 400, 600, 400, 1, 700, 230, 700, 1500];
+    moveDir = null;
+    qHoldRunning = false;
+    onTick = [];
+    hatBuyer() {
+        const hatsList = [
+            { acc: 11, cost: 2000, isAcc: 1 },
+            { hat: 6, cost: 4000, isAcc: 0 },
+            { hat: 12, cost: 6000, isAcc: 0 },
+            { hat: 7, cost: 6300, isAcc: 0 },
+            { hat: 53, cost: 10000, isAcc: 0},
+            { acc: 21, cost: 20000, isAcc: 1 }
+        ];
+        hatsList.forEach(item => {
+            const property = item?.isAcc ? "acc" : "hat";
+            if (item.cost < storage.__exports._items.context.points && !boughtHats.includes(item[property])) {
+                window.storeBuy(item[property], property == "acc" ? 1 : 0);
+                boughtHats.push(item[property]);
+            }
+        });
+    };
+    repeat(key, callback) {
+        const that = this;
+        this.onTick.push(function() {
+            if (that.events[key] && !that.taskRunning) {
+                that.taskRunning = true;
+                callback();
+                window.setTimeout(() => {
+                    that.taskRunning = false;
+                }, window.pingTime);
+            }
+        });
+    };
+    myPlayer = {
+        id: null,
+        x: null,
+        y: null
+    };
+    enemiesNear = [];
+    _state = false;
+    heal(count) {
+        while(count--) {
+            if (storage.__exports._items.context.health == 100) break;
+            this.emit(["5", [storage.__exports._items.hook[0], false]]);
+            this.emit(["c", [1]]);
+        };
+        this.emit(["5", [storage.__exports._items.context.weaponIndex, true]]);
+        if (this._state) this.emit(["c", [1]]);
+    };
+    place(id, dir = storage.nDir, check = true) {
+        const scale = storage.__exports._list.hook[id]?.scale;
+        const checkItemLocation = storage.__exports._checkItemLocation;
+        const player = storage.__exports._items.context;
+        const canPlace = checkItemLocation.hook(Math.cos(dir) * scale + player.x,
+                                                Math.sin(dir) * scale + player.y,
+                                                scale,
+                                                0,
+                                                id,
+                                                false,
+                                                checkItemLocation.context
+                                               );
+        if (storage.__exports._items.context.itemCounts && storage.__exports._items.context.itemCounts[storage.__exports._list.hook[id]?.group?.id] > 95) return;
+        if (!canPlace && check) return "no";
+        this.emit(["5", [id, false]]);
+        this.emit(["c", [1, dir]]);
+        this.emit(["5", [storage.__exports._items.context.weaponIndex, true]]);
+        if (this._state) this.emit(["c", [1, storage.nDir]]);
+    };
+    ws = WebSocket;
+    wss = {
+        send: () => { },
+        onmessage: () => { }
+    };
+    __exports = {};
+    __bundle_export__(func, checkup = (e => e), setter = e => e) {
+        const symbol = Symbol(func);
+        const that = this;
+        Object.defineProperty(Object.prototype, func, {
+            get() {
+                return this[symbol];
+            },
+            set(value) {
+                this[symbol] = setter(value);
+                if (!checkup(this)) return;
+                that.__exports["_" + func] = {
+                    hook: this[func],
+                    context: this
+                }
+            }
+        });
+    };
+    __force_value__(func, val) {
+        Object.defineProperty(Object.prototype, func, {
+            get() { return val },
+            set(v) { }
+        });
+    };
+    settings = {
+        spamReplace: true
+    }
+};
+const storage = window.storage = new GammaAPI;
+fetch("/bundle.js").then(r => r.text()).then(BUNDLE_SCRIPT => {
+    window.script = String(BUNDLE_SCRIPT).replaceAll("/18","/9")
+        .replaceAll("(U==A?ci():U.dir)", "U.dir");
+});
+window.addEventListener("keydown", ({ keyCode }) => {
+    storage.events[keyCode] = true;
+});
+window.addEventListener("keyup", ({ keyCode }) => {
+    storage.events[keyCode] = false;
+});
+window.WebSocket = class {
+    constructor(url) {
+        storage.wss = new storage.ws(url);
+        storage.wss.binaryType = "arraybuffer";
+        storage.emit = function(packet) {
+            if (this.dead) return;
+            storage.wss.send(window.msgpack.encode(packet));
+        }
+        storage.wss.addEventListener("message", function(event) {
+            this._server = this.onmessage;
+            const packet = window.msgpack.decode(event.data);
+            switch(packet[0]) {
+                case "11":
+                    storage.dead = true;
+                    storage.lastHp = 100;
+                    storage.trap = {};
+                    storage._state = false;
+                    break;
+                case "1":
+                    storage.myPlayer.id = packet[1][0];
+                    break;
+                case "h":
+                    if (packet[1][0] == storage.myPlayer.id && packet[1][1] < 100) {
+                        setTimeout(() => {
+                            storage.heal(Math.ceil((100 - packet[1][1]) / (storage.__exports._items.hook[0] == 0 ? 20 : 40)));
+                            storage.lastHp = packet[1][1];
+                        }, 120 - window.pingTime);
+                    }
+                    break;
+                case "ch":
+                    if (packet[1][0] == storage.myPlayer.id && packet[1][1] == ".n -m") {
+                        if (!storage.events[66]) storage.events[66] = false;
+                        storage.events[66] = !storage.events[66];
+                    } else if (packet[1][0] == storage.myPlayer.id && packet[1][1] == ".n -r") {
+                        storage.settings.spamReplace = !storage.settings.spamReplace;
+                    }
+                    break;
+                case "7":
+                    if (packet[1][0] == storage.myPlayer.id) {
+                        execHold();
+                    };
+                    break;
+                case "33":
+                    storage.nextTick = 111 - window.pingTime;
+                    break;
+            }
+        });
+        storage.wss.send = new Proxy(storage.wss.send, {
+            apply(target, that, args) {
+                const packet_ = window.msgpack.decode(args[0]);
+                if (packet_[0] == "33") {
+                    storage.moveDir = packet_[1][0];
+                } else if (packet_[0] == "sp") {
+                    storage.events[66] = true;
+                    packet_[1][0].skin = 8;
+                    args[0] = window.msgpack.encode(packet_);
+                    storage.dead = false;
+                } else if (packet_[0] == "c" && packet_[1][0] == 0) {
+                    storage.trap = false;
+                } else if (packet_[0] == "2" && packet_[1][0] !== storage.trapDir && storage.trap?.sid) {
+                    packet_[1][0] = storage.trapDir;
+                    args[0] = window.msgpack.encode(packet_);
+                } else if (packet_[0] == "2" && !storage.trap?.sid) {
+                    storage.nDir = packet_[1][0];
+                }
+                storage.packets++;
+                return Reflect.apply(...arguments);
+            }
+        });
+
+        return storage.wss;
+    }
+}
+
+storage.__bundle_export__("checkItemLocation");
+storage.__bundle_export__("items", context => {
+    return context.sid == storage.myPlayer.id;
+});
+storage.__bundle_export__("list", context => {
+    return !context.list.includes("ass");
+});
+storage.__bundle_export__("disableObj", context => {
+    return context
+}, value => {
+    return new Proxy(value, {
+        apply(target, that, args) {
+            const player = storage.__exports._items.context;
+            const item = args[0];
+            const dist = Math.hypot(player.x - item.x, player.y - item.y);
+            if (dist < 300) {
+                if (storage.settings.spamReplace === false) {
+                    if (item.name == "pit trap" && item.sid == storage?.trap?.sid) {
+                        window.storeEquip(6);
+                        /* G - Optimization */
+                        storage.trap = {};
+                        storage._state = false;
+                        target.apply(that, args);
+                        if (storage.place(storage.__exports._items.hook[2], storage.trapDir - Math.PI) == "no") {
+                            storage.emit(["c", [0, storage.nDir]]);
+                        };
+                    } else {
+                        const angle = Math.atan2(player.y - item.y, player.x - item.x);
+                        const itemId = storage.__exports._items.hook[item.group.id];
+                        if (itemId) {
+                            if (storage.place(itemId, angle - Math.PI) == "no") {
+                                storage.emit(["c", [0, storage.nDir]]);
+                            };
+                        }
+                    }
+                } else {
+                    for (let i = 0; i < Math.PI; i+=Math.PI / 2) {
+                        /* Extremee */
+                        storage.place(storage.__exports._items.hook[4], storage.nDir + i, false);
+                    };
+                    if (storage._state === true) {
+                        storage.emit(["c", [1, storage.nDir]]);
+                    };
+                }
+            }
+            return target.apply(that, args);
+        }
+    });
+});
+
+Object.defineProperty(Object.prototype, "maxPlayers", {
+    get() {
+        return 50
+    },
+    configurable: true
+});
+storage.repeat(86, () => storage.place(storage.__exports._items.hook[2], storage.nDir, false));
+storage.repeat(70, () => storage.place(storage.__exports._items.hook[4], storage.nDir, false));
+storage.repeat(66, () => {
+    if (storage.__exports._items.context?.itemCounts && storage.__exports._items.context?.itemCounts[storage?.__exports?._list?.hook[storage.__exports._items.hook[3]]?.group?.id] > 95) {
+        storage.events[66] = false;
+        return;
+    }
+    const player = storage.__exports._items.context;
+    const millPos = [1.5, -1.5, 0];
+
+    millPos.map(millAmg => {
+        return storage.place(storage.__exports._items.hook[3], storage.moveDir - millAmg - Math.PI);
+    });
+});
+storage.repeat(71, () => storage.place(storage.__exports._items.hook[5], storage.nDir, false));
+storage.repeat(82, () => {
+    const speed_x = 111;
+    window.storeEquip(boughtHats.includes(53) ? 53 : 0);
+    window.storeEquip(0, 1);
+    setTimeout(() => {
+        window.storeEquip(boughtHats.includes(7) ? 7 : 0);
+        storage.emit(["c", [1]]);
+        setTimeout(() => {
+            storage.emit(["5", [storage.__exports._items.context.weapons[1], true]]);
+            storage.emit(["c", [0]]);
+            setTimeout(() => {
+                storage.emit(["5", [storage.__exports._items.context.weapons[0], true]]);
+                window.storeEquip(6);
+            }, speed_x);
+        }, speed_x);
+    }, speed_x);
+});
+const execHold = () => {
+    let hat = storage.__exports._items.context.health == 100 ? 12 : 6;
+    window.storeEquip(boughtHats.includes(hat) ? hat : 28);
+    window.storeEquip(boughtHats.includes(11) ? 11 : 0, 1);
+    setTimeout(() => {
+        if (!storage._state) return;
+        let hat = 7;
+        window.storeEquip(boughtHats.includes(hat) ? hat : 0);
+        const acc = 21
+        window.storeEquip(boughtHats.includes(acc) ? acc : 0, 1);
+    }, storage.speeds[storage.__exports._items.context.weaponIndex]);
+}
+window.addEventListener("DOMContentLoaded", () => {
+    if (!location.href.includes("moomoo")) return;
+    const bundle = new window.Function(window.script).call(window, []);
+    setInterval(() => {
+        storage.hatBuyer();
+        storage.onTick.forEach(task => task());
+        storage.nextTick--;
+    }, 1);
+    const ct = document.getElementById("gameCanvas");
+    ct.addEventListener("mousedown", e => {
+        const player = storage.__exports._items.context;
+        if (player.tailIndex != 0) window.storeEquip(0, 1);
+        if (player.skinIndex != (boughtHats.includes(7) ? 7 : 0)) window.storeEquip(boughtHats.includes(7) ? 7 : 0);
+        storage._state = true;
+    });
+    ct.addEventListener("mouseup", e => {
+        const hat = storage.__exports._items.context.health == 100 ? 12 : 6;
+        const player = storage.__exports._items.context;
+        storage._state = false;
+        if (player.tailIndex != (boughtHats.includes(11) ? 11 : 0)) window.storeEquip(boughtHats.includes(11) ? 11 : 0, 1);
+        if (player.skinIndex != (boughtHats.includes(hat) ? hat : 28)) window.storeEquip(boughtHats.includes(hat) ? hat : 28);
+    });
+    addEventListener("wheel", e => {
+        const player = storage.__exports._items.context;
+        if (player.skinIndex != 7 && boughtHats.includes(7)) {
+            window.storeEquip(7);
+            window.storeEquip(13, 1);
+        }
+    });
+});
+const cma = Symbol("isItem");
+Object.defineProperty(Object.prototype, "isItem", {
+    get() {
+        item = this;
+        if (this.owner?.team) console.log(this.owner.team);
+        if (!this.owner) return;
+        const player = storage.__exports._items.context;
+        if (this.name == "pit trap" && this.owner.sid != storage.myPlayer.id && !storage.trap?.x && Math.hypot(
+            this.x - player.x,
+            this.y - player.y
+        ) < this.scale) {
+            storage.trap = this;
+            storage._state = true;
+            storage.trapDir = Math.atan2(this.y - player.y,
+                                         this.x - player.x);
+            storage.emit([
+                "c",
+                [
+                    1,
+                    storage.trapDir
+                ]
+            ]);
+        }
+        return this[cma];
+    },
+    set(val) {
+        this[cma] = val;
+    }
+});
+CanvasRenderingContext2D.prototype.restore = new Proxy(CanvasRenderingContext2D.prototype.restore, {
+    apply(target, that, args) {
+        if (item) item = null;
+        return target.apply(that, args);
+    }
+});
