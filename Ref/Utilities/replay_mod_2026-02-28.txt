@@ -1,0 +1,430 @@
+// ==UserScript==
+// @name         MooMoo.io ReplayMod
+// @namespace    http://tampermonkey.net/
+// @version      0.1
+// @description  try to take over the world!
+// @author       razoshi
+// @match        *://*.moomoo.io/*
+// @icon         https://i.pinimg.com/1200x/11/fb/b0/11fbb0bcbd1b073568bb7c7c7cfb462e.jpg
+// @run-at       document-end
+// @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
+// ==/UserScript==
+
+// ==Packet Override==
+const PACKET_MAP = {
+  33: "9",
+  7: "K",
+  ch: "6",
+  pp: "0",
+  "13c": "c",
+  f: "9",
+  a: "9",
+  d: "F",
+  G: "z",
+};
+
+let originalSend = WebSocket.prototype.send;
+
+WebSocket.prototype.send = new Proxy(originalSend, {
+ apply: (target, websocket, argsList) => {
+ let decoded = msgpack.decode(new Uint8Array(argsList[0]));
+ if (PACKET_MAP.hasOwnProperty(decoded[0])) {
+   decoded[0] = PACKET_MAP[decoded[0]];
+ }
+ return target.apply(websocket, [msgpack.encode(decoded)]);
+ },
+});
+// ==End Packet Override==
+
+
+(function() {
+    'use strict';
+
+    let mediaRecorder;
+    let recordedChunks = [];
+    let isRecording = false;
+    let recordings = [];
+    let settings = {
+        mode: 'Game',
+        fps: 60,
+        quality: 8000000,
+        autoSave: false,
+        volume: 1
+    };
+
+    let keybinds = {
+        record: 'KeyR',
+        stop: 'KeyT',
+        menu: 'Insert'
+    };
+    let listeningForKey = null;
+    let currentTab = null;
+
+    const style = document.createElement('style');
+    style.innerHTML = `
+    #ob-menu {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        width: 740px; height: 500px;
+        background: rgba(20, 20, 20, 0.85);
+        backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+        border-radius: 4px; font-family: 'Segoe UI', sans-serif; color: #eee;
+        display: none; z-index: 1000000; overflow: hidden;
+        box-shadow: 0 15px 50px rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    #ob-main::-webkit-scrollbar { width: 4px; }
+    #ob-main::-webkit-scrollbar-track { background: transparent; }
+    #ob-main::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+    #ob-main::-webkit-scrollbar-thumb:hover { background: #666; }
+
+    #ob-header {
+        width: 100%; height: 40px; line-height: 40px; text-align: center;
+        font-size: 13px; color: #999; letter-spacing: 1.5px; font-weight: 100;
+        background: rgba(0,0,0,0.4); cursor: grab; user-select: none;
+    }
+    #ob-header:active { cursor: grabbing; }
+
+    #ob-body { display: flex; height: calc(100% - 40px); }
+
+    #ob-sidebar { width: 140px; background: rgba(0,0,0,0.3); padding: 15px; }
+    .ob-tab {
+        padding: 12px 25px; cursor: pointer; font-size: 12px; color: #777;
+        transition: 0.2s; position: relative; font-weight: 500; user-select: none;
+    }
+    .ob-tab:hover { color: #ccc; }
+    .ob-tab.active { color: #fff; background: rgba(255, 255, 255, 0.05); }
+    .ob-tab.active::after {
+        content: ''; position: absolute; right: 0; top: 0; height: 100%;
+        width: 2px; background: #fff;
+    }
+
+    #ob-main { flex: 1; padding: 25px; overflow-y: auto; overflow-x: hidden; }
+    .tab-wrapper { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+    .animate-fade { animation: fadeInTab 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+    @keyframes fadeInTab {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .ob-section { display: flex; flex-direction: column; gap: 10px; }
+    .ob-title { font-size: 11px; font-weight: 100; color: #fff; opacity: 0.8; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    .ob-row {
+        background: rgba(255, 255, 255, 0.04); padding: 10px 14px; border-radius: 4px;
+        display: flex; justify-content: space-between; align-items: center; min-height: 35px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.02);
+    }
+    .ob-row-col { flex-direction: column; align-items: stretch; gap: 12px; padding: 12px 14px; }
+    .ob-label { font-size: 11px; color: #aaa; }
+
+    .ob-select-wrap { position: relative; width: 120px; }
+    .ob-select-head {
+        background: rgba(0,0,0,0.5); padding: 6px 10px; border-radius: 4px;
+        font-size: 11px; cursor: pointer; text-align: right; color: #ddd;
+        border: 1px solid rgba(255,255,255,0.1); user-select: none;
+    }
+    .ob-select-list {
+        position: absolute; top: 100%; left: 0; width: 100%; background: #1a1a1a;
+        border-radius: 4px; margin-top: 4px; z-index: 10;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.1);
+        opacity: 0; visibility: hidden; transform: translateY(-10px);
+        transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); pointer-events: none;
+    }
+    .ob-select-list.open { opacity: 1; visibility: visible; transform: translateY(0); pointer-events: auto; }
+    .ob-select-item { padding: 8px 10px; font-size: 11px; cursor: pointer; transition: 0.15s; color: #aaa; text-align: right; }
+    .ob-select-item:hover { background: rgba(255,255,255,0.05); color: #fff; }
+
+    .ob-btn {
+        flex: 1; padding: 10px; border: none; background: rgba(255,255,255,0.05);
+        color: #ddd; cursor: pointer; font-size: 11px; border-radius: 4px; transition: 0.2s;
+        font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .ob-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+    .ob-btn.active-rec { color: #fff; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0% {background: rgba(255,255,255,0.05);} 50% {background: rgba(255,255,255,0.15);} 100% {background: rgba(255,255,255,0.05);} }
+
+    .ob-keybind-btn {
+        background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1);
+        color: #ddd; padding: 4px 10px; border-radius: 4px; font-size: 11px;
+        cursor: pointer; min-width: 60px; text-align: center; transition: 0.2s; font-weight: bold;
+    }
+    .ob-keybind-btn:hover { background: rgba(0,0,0,0.8); color: #fff; }
+    .ob-keybind-btn.listening {
+        background: rgba(255, 255, 255, 0.1); color: #fff; border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .ob-switch { position: relative; width: 32px; height: 16px; }
+    .ob-switch input { opacity: 0; width: 0; height: 0; }
+    .ob-sl {
+        position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+        background-color: #333; transition: .3s; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1);
+    }
+    .ob-sl:before {
+        position: absolute; content: ""; height: 12px; width: 12px; left: 1px; bottom: 1px;
+        background-color: #888; transition: .3s; border-radius: 50%;
+    }
+    input:checked + .ob-sl { background-color: #fff; }
+    input:checked + .ob-sl:before { transform: translateX(16px); background-color: #000; }
+
+    input[type=range] {
+        -webkit-appearance: none; width: 100%; height: 4px; border-radius: 4px;
+        background: #333; outline: none; margin: 10px 0; padding: 0; border: none;
+    }
+    input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; }
+    input[type=range]::-webkit-slider-thumb {
+        -webkit-appearance: none; height: 14px; width: 14px; border-radius: 50%;
+        background: #fff; cursor: pointer; border: none; box-shadow: 0 0 5px rgba(0,0,0,0.5);
+        margin-top: -5px;
+    }
+
+    .ob-rec-container { grid-column: 1/3; display: flex; flex-direction: column; gap: 10px; }
+    .ob-rec-item {
+        background: rgba(255,255,255,0.03); padding: 15px; border-radius: 4px;
+        display: flex; justify-content: space-between; align-items: center; border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .ob-empty-state {
+        text-align: center; margin-top: 60px; opacity: 0.6; display: flex; flex-direction: column; align-items: center;
+    }
+    .ob-empty-state img { width: 90px; margin-bottom: 15px; opacity: 0.9; }
+    .ob-empty-state div { font-size: 14px; font-weight: 100; color: #fff; letter-spacing: 1px; text-transform: uppercase; }
+`;
+    document.head.appendChild(style);
+
+    const menu = document.createElement('div');
+    menu.id = 'ob-menu';
+    menu.innerHTML = `
+    <div id="ob-header">ReplayMod</div>
+    <div id="ob-body">
+        <div id="ob-sidebar">
+            <div class="ob-tab active" data-tab="record">Record</div>
+            <div class="ob-tab" data-tab="recordings">Recordings</div>
+            <div class="ob-tab" data-tab="settings">Settings</div>
+        </div>
+        <div id="ob-main"></div>
+    </div>
+`;
+    document.body.appendChild(menu);
+
+    const main = menu.querySelector('#ob-main');
+    const header = menu.querySelector('#ob-header');
+
+    let isDragging = false, startX, startY, initialLeft, initialTop;
+    header.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        let rect = menu.getBoundingClientRect();
+        if(menu.style.transform !== 'none') {
+            menu.style.transform = 'none';
+            menu.style.left = rect.left + 'px';
+            menu.style.top = rect.top + 'px';
+        }
+        initialLeft = rect.left;
+        initialTop = rect.top;
+    });
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        menu.style.left = (initialLeft + (e.clientX - startX)) + 'px';
+        menu.style.top = (initialTop + (e.clientY - startY)) + 'px';
+    });
+    document.addEventListener('mouseup', () => isDragging = false);
+
+    window.createSelect = (id, options, currentVal, callback) => {
+        let optionsHTML = options.map(opt => `<div class="ob-select-item" onclick="window.handleSelect('${id}', '${opt.val}', '${opt.label}', ${callback})">${opt.label}</div>`).join('');
+        return `
+        <div class="ob-select-wrap" id="wrap-${id}">
+            <div class="ob-select-head" onclick="window.toggleDrop('${id}')">${currentVal}</div>
+            <div class="ob-select-list" id="list-${id}">${optionsHTML}</div>
+        </div>
+    `;
+    };
+    window.toggleDrop = (id) => {
+        document.querySelectorAll('.ob-select-list').forEach(l => { if(l.id !== `list-${id}`) l.classList.remove('open'); });
+        document.getElementById(`list-${id}`).classList.toggle('open');
+    };
+    window.handleSelect = (id, val, label, callback) => {
+        document.querySelector(`#wrap-${id} .ob-select-head`).innerText = label;
+        document.getElementById(`list-${id}`).classList.remove('open');
+        callback(val);
+    };
+    window.updateSliderStyle = (el) => {
+        const val = (el.value - el.min) / (el.max - el.min) * 100;
+        el.style.background = `linear-gradient(to right, #666 ${val}%, #333 ${val}%)`;
+    };
+
+    window.formatKey = (code) => {
+        if(!code) return 'NONE';
+        if(code.startsWith('Key')) return code.slice(3);
+        if(code.startsWith('Digit')) return code.slice(5);
+        if(code === 'Insert') return 'INS';
+        if(code === 'Escape') return 'ESC';
+        if(code === 'Space') return 'SPACE';
+        return code.toUpperCase();
+    };
+
+    window.listenKey = (action) => {
+        listeningForKey = action;
+        showTab('settings', true);
+    };
+
+    const render = {
+        record: () => {
+            let volPercentage = settings.volume * 100;
+            return `
+        <div class="ob-section">
+            <div class="ob-title">Record</div>
+            <div class="ob-row">
+                <span class="ob-label">Source</span>
+                ${window.createSelect('mode', [{val:'Game', label:'Game (Canvas)'}, {val:'Full', label:'Full (Screen)'}], settings.mode === 'Game' ? 'Game (Canvas)' : 'Full (HUD)', "(v) => window.setS('mode', v)")}
+            </div>
+            <div style="display:flex; gap:5px; margin-top:5px">
+                <button id="start-btn" class="ob-btn ${isRecording ? 'active-rec' : ''}" onclick="window.startRec()">${isRecording ? 'RECORDING' : 'Record'}</button>
+                <button class="ob-btn" onclick="window.stopRec()">Stop</button>
+            </div>
+            <div class="ob-row" style="margin-top: 5px;">
+                <span class="ob-label">Lock delta</span>
+                <label class="ob-switch"><input type="checkbox" checked><span class="ob-sl"></span></label>
+            </div>
+        </div>
+        <div class="ob-section">
+            <div class="ob-title">Quality</div>
+            <div class="ob-row">
+                <span class="ob-label">FPS limit</span>
+                ${window.createSelect('fps', [{val:30, label:'30 FPS'}, {val:60, label:'60 FPS'}, {val:120, label:'120 FPS'}, {val:144, label:'144 FPS'}], settings.fps + ' FPS', "(v) => window.setS('fps', parseInt(v))")}
+            </div>
+            <div class="ob-row">
+                <span class="ob-label">Bitrate</span>
+                ${window.createSelect('bitrate', [{val:2000000, label:'2 Mbps'}, {val:5000000, label:'5 Mbps'}, {val:8000000, label:'8 Mbps'}, {val:15000000, label:'15 Mbps'}, {val:20000000, label:'20 Mbps'}], (settings.quality / 1000000) + ' Mbps', "(v) => window.setS('quality', parseInt(v))")}
+            </div>
+
+            <div class="ob-row ob-row-col" style="margin-top: 5px;">
+                <div style="display:flex; justify-content:space-between; width:100%">
+                    <span class="ob-label">Volume</span>
+                    <span class="ob-label" id="vol-display" style="color:#fff">${Math.round(volPercentage)}%</span>
+                </div>
+                <input type="range" min="0" max="1" step="0.01" value="${settings.volume}"
+                    style="background: linear-gradient(to right, #666 ${volPercentage}%, #333 ${volPercentage}%)"
+                    oninput="window.updateSliderStyle(this); window.setVol(this.value); document.getElementById('vol-display').innerText = Math.round(this.value * 100) + '%'">
+            </div>
+        </div>
+    `},
+        recordings: () => `
+        <div class="ob-rec-container">
+            <div class="ob-title">Replays</div>
+            ${recordings.length ? recordings.map((r, i) => `
+                <div class="ob-rec-item">
+                    <div>
+                        <div style="font-size:12px; color:#fff; font-weight:bold;">Replay_${i+1}.webm</div>
+                        <div style="font-size:10px; color:#888; margin-top:3px">${r.size} MB | ${r.mode} mode</div>
+                    </div>
+                    <div style="display:flex; gap:5px">
+                        <button class="ob-btn" style="padding:6px 15px; flex:none" onclick="window.saveRec(${i})">Save</button>
+                        <button class="ob-btn" style="padding:6px 15px; flex:none; color:#ff5555" onclick="window.delRec(${i})">✕</button>
+                    </div>
+                </div>
+            `).join('') : `
+                <div class="ob-empty-state">
+                    <div>No Recordings Yet</div>
+                </div>
+            `}
+        </div>
+    `,
+        settings: () => `
+        <div class="ob-section" style="grid-column: 1/3">
+            <div class="ob-title">General</div>
+            <div class="ob-row">
+                <span class="ob-label">Auto Save</span>
+                <label class="ob-switch"><input type="checkbox" ${settings.autoSave ? 'checked' : ''} onchange="window.setS('autoSave', this.checked)"><span class="ob-sl"></span></label>
+            </div>
+
+            <div class="ob-title" style="margin-top: 15px;">Binds</div>
+            <div class="ob-row">
+                <span class="ob-label">Toggle Menu</span>
+                <button class="ob-keybind-btn ${listeningForKey === 'menu' ? 'listening' : ''}" onclick="window.listenKey('menu')">${listeningForKey === 'menu' ? '...' : window.formatKey(keybinds.menu)}</button>
+            </div>
+            <div class="ob-row">
+                <span class="ob-label">Start Recording</span>
+                <button class="ob-keybind-btn ${listeningForKey === 'record' ? 'listening' : ''}" onclick="window.listenKey('record')">${listeningForKey === 'record' ? '...' : window.formatKey(keybinds.record)}</button>
+            </div>
+            <div class="ob-row">
+                <span class="ob-label">Stop Recording</span>
+                <button class="ob-keybind-btn ${listeningForKey === 'stop' ? 'listening' : ''}" onclick="window.listenKey('stop')">${listeningForKey === 'stop' ? '...' : window.formatKey(keybinds.stop)}</button>
+            </div>
+        </div>
+    `
+    };
+
+    function showTab(n, isUpdate = false) {
+        if (currentTab === n && !isUpdate) return;
+        main.innerHTML = `<div class="tab-wrapper ${isUpdate ? '' : 'animate-fade'}">${render[n]()}</div>`;
+        currentTab = n;
+        document.querySelectorAll('.ob-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === n));
+    }
+
+    document.querySelectorAll('.ob-tab').forEach(t => t.onclick = () => showTab(t.dataset.tab, false));
+
+    window.setS = (k, v) => settings[k] = v;
+    window.setVol = (v) => { settings.volume = v; document.querySelectorAll('audio,video').forEach(a => a.volume = v); };
+
+    window.startRec = async function() {
+        if (isRecording) return;
+        let stream;
+        if (settings.mode === 'Game') {
+            let canvas = document.getElementById('gameCanvas');
+            if(!canvas) return alert("Game canvas not found!");
+            stream = canvas.captureStream(settings.fps);
+        } else {
+            try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: settings.fps }, audio: true }); } catch(e) { return; }
+        }
+
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(stream, {
+            mimeType: 'video/webm;codecs=vp9',
+            videoBitsPerSecond: settings.quality
+        });
+
+        mediaRecorder.ondataavailable = e => e.data.size > 0 && recordedChunks.push(e.data);
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            recordings.push({ url: URL.createObjectURL(blob), size: (blob.size/1024/1024).toFixed(1), mode: settings.mode });
+            isRecording = false;
+            showTab('record', true);
+            if (settings.autoSave) window.saveRec(recordings.length - 1);
+        };
+
+        mediaRecorder.start();
+        isRecording = true;
+        showTab('record', true);
+    };
+
+    window.stopRec = () => mediaRecorder && mediaRecorder.stop();
+    window.saveRec = (i) => { const a = document.createElement('a'); a.href = recordings[i].url; a.download = `mmreplay-${Date.now()}.webm`; a.click(); };
+    window.delRec = (i) => { recordings.splice(i,1); showTab('recordings', true); };
+
+    window.addEventListener('keydown', e => {
+        if (listeningForKey) {
+            e.preventDefault(); e.stopPropagation();
+            keybinds[listeningForKey] = e.code === 'Escape' ? '' : e.code;
+            listeningForKey = null;
+            if(currentTab === 'settings') showTab('settings', true);
+            return;
+        }
+
+        if (document.activeElement.tagName === 'INPUT') return;
+
+        if (e.code === keybinds.menu) menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+        if (e.code === keybinds.record && !isRecording) window.startRec();
+        if (e.code === keybinds.stop && isRecording) window.stopRec();
+    });
+
+    window.onclick = (e) => {
+        if (!e.target.classList.contains('ob-select-head')) {
+            document.querySelectorAll('.ob-select-list').forEach(l => l.classList.remove('open'));
+        }
+    };
+
+    showTab('record', false);
+
+})();

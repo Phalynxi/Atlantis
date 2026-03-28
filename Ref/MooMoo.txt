@@ -8,6 +8,7 @@
 // @require      https://greasyfork.org/scripts/410512-sci-js-from-ksw2-center/code/scijs%20(from%20ksw2-center).js?version=843639
 // @require      https://cdnjs.cloudflare.com/ajax/libs/msgpack-lite/0.1.26/msgpack.min.js
 // @grant        GM.setValue
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // @grant        GM.getValue
 // @grant        unsafeWindow
 // @description  commands: p(key) = bot come/stop, !join (+ team name) = join clan, !leave = leave clan, !" = follow player, !* = move with w,a,s,d, !mousetrack = move with mouse, !stopp = stop move with mouse, shift(key) = unequip hat, m(key) = biome hat, z(key) = tank gear, home(key) = soldier helmet or emp helmet, b(key) = bull helmet, u(key) = samurai armor

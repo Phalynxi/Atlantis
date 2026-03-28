@@ -8,6 +8,7 @@
 // @match        *://sandbox.moomoo.io/*
 // @icon         https://cdn.discordapp.com/attachments/1082958297956618317/1105763950890582036/standard.gif
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // ==/UserScript==
 document.getElementById("gameUI").style.backgroundImage = "url('')";
 document.getElementById("mainMenu").style.backgroundImage = "url('')";

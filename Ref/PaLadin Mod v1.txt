@@ -7,6 +7,7 @@
 // @match        *://*.moomoo.io/*
 // @icon         https://th.bing.com/th/id/OIP.ULV-cGDBblxI20AKBssltwHaFj?pid=ImgDet&rs=1
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // ==/UserScript==
 
 

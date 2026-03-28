@@ -4,6 +4,7 @@
 // @match        ://*.moomoo.io/*
 // @icon    https://cutewallpaper.org/26/beautiful-magical-gif-wallpaper/best-magical-objects-gifs-gfycat.gif
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 //@versoin         1
 
 /////////////////////////////////

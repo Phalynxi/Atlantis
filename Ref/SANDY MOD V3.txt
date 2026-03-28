@@ -4,6 +4,7 @@
 // @description  OP PATH FINDER, ANTI INSTA, AUTO BREAK, ANTI KICK, ONE FRAME
 // @match        *://*.moomoo.io/*
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // @author       HAXXER ON YT/POOP SACK
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jquery-confirm/3.3.0/jquery-confirm.min.js
 // @require      https://cdn.jsdelivr.net/npm/msgpack-lite@0.1.26/dist/msgpack.min.js

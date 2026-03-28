@@ -10,6 +10,7 @@
 // @icon        https://moomoo.io/img/favicon.png?v=1
 // @match        ://dev.moomoo.io/
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // @namespace https://greasyfork.org/users/1072528
 // ==/UserScript==
 // PLEASE CREDIT S (InsanityMon, Ueheua) for skidding or editing this script thanks!

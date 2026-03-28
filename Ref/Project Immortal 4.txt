@@ -10,6 +10,7 @@
 // @require      https://raw.githubusercontent.com/Nudo-o/MooUI/main/dist/mooui.min.js
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // ==/UserScript==
 
 (function() {

@@ -8,6 +8,7 @@
 // @require      https://rawgit.com/kawanet/msgpack-lite/master/dist/msgpack.min.js
 // @run-at       document-end
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // ==/UserScript==
 let DevelopmentScripterMode = false; /* Connect Useless Server */
 

@@ -10,6 +10,7 @@
 // @require       https://cdnjs.cloudflare.com/ajax/libs/jquery-confirm/3.3.0/jquery-confirm.min.js
 // @icon          https://i.imgur.com/Q7vI76D.png
 // @grant         unsafeWindow
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // ==/UserScript==
 
 //ADD YOUR PLAYERS IN MAP [Future update]

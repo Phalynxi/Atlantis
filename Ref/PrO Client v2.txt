@@ -7,6 +7,7 @@
 // @require      https://rawgit.com/kawanet/msgpack-lite/master/dist/msgpack.min.js
 // @run-at       document-end
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // @icon         https://yt3.googleusercontent.com/ytc/AOPolaSSEEgGgNDhaSMXJlNKu7wH0J7FmlAxQjcRogzG=s176-c-k-c0x00ffffff-no-rj
 // ==/UserScript==
 

@@ -7,6 +7,7 @@
 // @match     https//sandbox.moomoo.io/
 // @icon         https://pixelbox.ru/wp-content/uploads/2021/09/anime-gif-discord-70.gif
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // @namespace https://greasyfork.org/users/1072528
 // ==/UserScript==
 alert(`MoodMod By hand`)

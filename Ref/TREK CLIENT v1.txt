@@ -7,6 +7,7 @@
 //@icon          https://static.wikia.nocookie.net/moom/images/8/85/Hat_45.png/revision/latest?cb=20171206232219
 // @run-at       document-end
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // ==/UserScript==
 
 var newHatImgs = {

@@ -1,0 +1,198 @@
+// ==UserScript==
+// @name         MooMoo.io Optimizer++
+// @namespace    http://tampermonkey.net/
+// @version      2026-03-04
+// @description  try to take over the world!
+// @author       razoshi
+// @match        *://*.moomoo.io/*
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=moomoo.io
+// @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
+// ==/UserScript==
+
+// ==Packet Override==
+const PACKET_MAP = {
+  33: "9",
+  7: "K",
+  ch: "6",
+  pp: "0",
+  "13c": "c",
+  f: "9",
+  a: "9",
+  d: "F",
+  G: "z",
+};
+
+let originalSend = WebSocket.prototype.send;
+
+WebSocket.prototype.send = new Proxy(originalSend, {
+ apply: (target, websocket, argsList) => {
+ let decoded = msgpack.decode(new Uint8Array(argsList[0]));
+ if (PACKET_MAP.hasOwnProperty(decoded[0])) {
+   decoded[0] = PACKET_MAP[decoded[0]];
+ }
+ return target.apply(websocket, [msgpack.encode(decoded)]);
+ },
+});
+// ==End Packet Override==
+
+
+(function() {
+    'use strict';
+
+    const { port1, port2 } = new MessageChannel();
+    const queue = [];
+    let idCounter = 0;
+
+    let frameCount = 0;
+    let lastFpsUpdate = performance.now();
+    let currentFps = 0;
+
+    function updateFpsDisplay() {
+        const pingDisplay = document.getElementById('pingDisplay');
+        if (pingDisplay) {
+            const ping = window.pingTime || 0;
+            pingDisplay.innerText = `Ping: ${ping} ms | FPS: ${currentFps}`;
+        }
+    }
+
+    port2.onmessage = function() {
+        const tasks = queue.slice();
+        queue.length = 0;
+        const now = performance.now();
+
+        frameCount++;
+        if (now - lastFpsUpdate >= 1000) {
+            currentFps = Math.round((frameCount * 1000) / (now - lastFpsUpdate));
+            frameCount = 0;
+            lastFpsUpdate = now;
+            updateFpsDisplay();
+        }
+
+        for (let i = 0; i < tasks.length; i++) {
+            tasks[i](now);
+        }
+    };
+
+    function unlockedRAF(callback) {
+        queue.push(callback);
+        port1.postMessage(null);
+        return ++idCounter;
+    }
+
+    function unlockedCancel(id) {}
+
+    window.requestAnimFrame = unlockedRAF;
+    window.cancelAnimationFrame = unlockedCancel;
+
+    const config = {
+        hideGrid: true,
+        hideNames: false,
+        noStrokeText: false,
+        noShadows: true,
+        simpleHealthBar: true,
+        noChat: false,
+        noWaveAnim: true,
+        culling: true
+    };
+
+    const ctx = CanvasRenderingContext2D.prototype;
+    const _stroke = ctx.stroke;
+    const _fillText = ctx.fillText;
+    const _strokeText = ctx.strokeText;
+    const _beginPath = ctx.beginPath;
+    const _arc = ctx.arc;
+    const _drawImage = ctx.drawImage;
+    const _setAlpha = Object.getOwnPropertyDescriptor(ctx, 'globalAlpha').set;
+
+    ctx.strokeText = function() {
+        if (config.noStrokeText) return;
+        return _strokeText.apply(this, arguments);
+    };
+
+    ctx.stroke = function() {
+        if (config.hideGrid && this.globalAlpha === 0.06) return;
+
+        if (config.noShadows) {
+            this.shadowBlur = 0;
+            this.shadowColor = "transparent";
+        }
+        return _stroke.apply(this, arguments);
+    };
+
+    const _fillRect = ctx.fillRect;
+    ctx.fillRect = function(x, y, w, h) {
+        if (config.noShadows && this.globalAlpha === 0.35 && w > 1000) return;
+        return _fillRect.apply(this, arguments);
+    };
+
+    ctx.drawImage = function(img, x, y, w, h) {
+        if (config.culling && arguments.length >= 5) {
+            if (x + w < -100 || x > 2020 || y + h < -100 || y > 1180) {
+                return;
+            }
+        }
+        return _drawImage.apply(this, arguments);
+    };
+
+    ctx.arc = function() {
+        if (config.simpleHealthBar && this.globalAlpha < 1 && arguments[2] < 10) return;
+        return _arc.apply(this, arguments);
+    };
+
+    let mapFrameSkip = 0;
+    const _clearRect = ctx.clearRect;
+    ctx.clearRect = function(x, y, w, h) {
+        if (w === 300 && h === 300) {
+            mapFrameSkip++;
+            if (mapFrameSkip % 3 !== 0) return;
+        }
+        return _clearRect.apply(this, arguments);
+    };
+
+    const optimizeGameConfig = () => {
+        if (window.config) {
+            window.config.deathFadeout = 0;
+            window.config.mapPingTime = 0;
+            if (config.noWaveAnim) {
+                window.config.waveSpeed = 0;
+            }
+            // window.config.gatherWiggle = 0;
+        }
+    };
+
+    const originalGetContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = function () {
+        const ctx = originalGetContext.call(this, ...arguments)
+        if (arguments[0] === "2d" && ctx) {
+            const originalLineTo = ctx.lineTo;
+            ctx.lineTo = function (x, y) {
+                if (x === 0) {
+                    ctx.lineJoin = "round";
+                }
+                return originalLineTo.call(this, x, y);
+            }
+        }
+        return ctx;
+    }
+
+    window.addEventListener("load", function () {
+        const trashasss = ['ad-container', 'promoImgHolder', 'error-message', 'chatButton'];
+        trashasss.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        });
+
+        optimizeGameConfig();
+
+        if (config.noHowler) {
+            window.Howl = function() {
+                this.play = () => {};
+                this.stop = () => {};
+                this.mute = () => {};
+                this.volume = () => {};
+                this.loop = () => {};
+            };
+        }
+    });
+})();

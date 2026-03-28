@@ -6,6 +6,7 @@
 // @match        *://*.moomoo.io/*
 // @require      https://cdn.jsdelivr.net/npm/msgpack-lite@0.1.26/dist/msgpack.min.js
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // @namespace    none - yet
 // @run-at      document-start
 // ==/UserScript==

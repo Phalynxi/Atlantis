@@ -1,0 +1,851 @@
+// ==UserScript==
+// @name            ! Glotus Client [Moomoo.io] - Enhanced Bots
+// @author          Murka (original), Enhanced Bot System
+// @description     Glotus Client with significantly improved bot 
+// @icon            https://i.imgur.com/rlMQW2P.png
+// @version         5.5.4-bots
+// @match           *://moomoo.io/
+// @match           *://moomoo.io/?server*
+// @match           *://*.moomoo.io/
+// @match           *://*.moomoo.io/?server*
+// @run-at          document-start
+// @grant           none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
+// @license         MIT
+// @namespace       https://github.com/Murka007/Glotus-client
+// @downloadURL https://update.greasyfork.org/scripts/570726/%21%20Glotus%20Client%20%5BMoomooio%5D%20-%20Enhanced%20Bots.user.js
+// @updateURL https://update.greasyfork.org/scripts/570726/%21%20Glotus%20Client%20%5BMoomooio%5D%20-%20Enhanced%20Bots.meta.js
+// ==/UserScript==
+
+// ==Packet Override==
+const PACKET_MAP = {
+ 33: "9",
+ 7: "K",
+ ch: "6",
+ pp: "0",
+ "13c": "c",
+ f: "9",
+ a: "9",
+ d: "F",
+ G: "z",
+};
+
+let originalSend = WebSocket.prototype.send;
+
+WebSocket.prototype.send = new Proxy(originalSend, {
+ apply: (target, websocket, argsList) => {
+ let decoded = msgpack.decode(new Uint8Array(argsList[0]));
+ if (PACKET_MAP.hasOwnProperty(decoded[0])) {
+   decoded[0] = PACKET_MAP[decoded[0]];
+ }
+ return target.apply(websocket, [msgpack.encode(decoded)]);
+ },
+});
+// ==End Packet Override==
+
+/*
+ * BOT IMPROVEMENT PATCH
+ * =====================
+ * This file contains ONLY the new/modified bot code.
+ * Instructions:
+ *
+ * 1. In `defaultSettings`, ADD after the existing entries:
+ *      _botCombatMode: true,
+ *      _botFlankMode: true,
+ *      _botFlankDistance: 85,
+ *      _botTurretAssist: true,
+ *      _botCoordinateAttacks: true,
+ *      _botSpikeAssist: true,
+ *      _botRole: "auto",         // "auto" | "attacker" | "shield" | "placer"
+ *      _botAttackDelay: 1,       // ticks to stagger bot attacks (0-3)
+ *      _botRetreatHP: 30,        // bot retreats below this HP %
+ *
+ * 2. REPLACE the `Movement` class (find: `class Movement {`) with the one below.
+ *
+ * 3. REPLACE the `TempData` class (find: `class TempData {`) with the one below.
+ *
+ * 4. REPLACE the `AutoBuy` class (find: `class AutoBuy {`) with the one below.
+ *
+ * 5. REPLACE the `ClanJoiner` class with the one below.
+ *
+ * 6. ADD the following NEW classes BEFORE the `ModuleHandler` class:
+ *      - BotCombat
+ *      - BotCoordinate
+ *      - BotPlacement
+ *      - BotRole
+ *      - BotRetreat
+ *
+ * 7. In `ModuleHandler` constructor, FIND the line:
+ *      this.botModules = [ this.staticModules.tempData, ... ];
+ *    REPLACE with the new botModules array shown below.
+ *
+ * 8. REPLACE the Bots_default HTML string with the one below.
+ */
+
+// ============================================================
+// NEW SETTINGS (add to defaultSettings object)
+// ============================================================
+const BOT_SETTING_ADDITIONS = {
+    _botCombatMode: true,
+    _botFlankMode: true,
+    _botFlankDistance: 85,
+    _botTurretAssist: true,
+    _botCoordinateAttacks: true,
+    _botSpikeAssist: true,
+    _botRole: "auto",
+    _botAttackDelay: 1,
+    _botRetreatHP: 30,
+};
+
+// ============================================================
+// REPLACEMENT: Movement class (improved bot movement)
+// ============================================================
+class Movement {
+    moduleName = "movement";
+    client;
+    isStopped = true;
+    combatMode = false;
+    retreating = false;
+
+    constructor(client) { this.client = client; }
+
+    getMovePosition() {
+        return this.client.ownerClient.InputHandler.getMovePosition();
+    }
+
+    /** Spreads bots evenly around the target enemy for flanking */
+    getFlankPosition(enemy) {
+        const owner = this.client.ownerClient;
+        const totalBots = owner.clients.size;
+        if (totalBots === 0) return enemy.pos.current.copy();
+
+        const botIndex = owner.getClientIndex(this.client);
+        const ownerPos = owner.myPlayer.pos.current;
+        const enemyPos = enemy.pos.current;
+
+        // Spread bots at roughly weapon-range distance around the enemy
+        const baseAngle = ownerPos.angle(enemyPos);
+        const spread = (Math.PI * 2) / (totalBots + 1); // +1 to leave the owner's side clear
+        const angle = baseAngle + spread * (botIndex + 1);
+        const dist = Settings_default._botFlankDistance;
+
+        return enemyPos.addDirection(angle, dist);
+    }
+
+    /** Retreat position: move away from the enemy toward owner */
+    getRetreatPosition() {
+        const { myPlayer } = this.client;
+        const ownerPos = this.client.ownerClient.myPlayer.pos.current;
+        const pos = myPlayer.pos.current;
+        const awayAngle = pos.angle(ownerPos); // run toward owner
+        return pos.addDirection(awayAngle, 250);
+    }
+
+    circlePosition(vec) {
+        const totalBots = this.client.ownerClient.clients.size;
+        if (totalBots === 0) return vec;
+        const { circleOffset } = this.client.ownerClient._ModuleHandler;
+        const botIndex = this.client.ownerClient.getClientIndex(this.client);
+        const angle = 2 * Math.PI * botIndex / totalBots + circleOffset;
+        return vec.addDirection(angle, Settings_default._circleRadius);
+    }
+
+    getActualPosition() {
+        const { myPlayer } = this.client;
+        const ownerEnemy = this.client.ownerClient.EnemyManager.nearestEnemy;
+
+        // Retreat if low health
+        const hpPct = myPlayer.currentHealth / myPlayer.maxHealth * 100;
+        if (hpPct <= Settings_default._botRetreatHP && hpPct > 0) {
+            this.retreating = true;
+            this.combatMode = false;
+            return this.getRetreatPosition();
+        }
+        this.retreating = false;
+
+        // Combat flanking mode
+        if (ownerEnemy !== null && Settings_default._botCombatMode && Settings_default._botFlankMode) {
+            this.combatMode = true;
+            return this.getFlankPosition(ownerEnemy);
+        }
+
+        this.combatMode = false;
+        const pos = this.getMovePosition();
+        if (Settings_default._circleFormation) return this.circlePosition(pos);
+        return pos;
+    }
+
+    someColliding(pos, radius) {
+        const { previous, current } = this.client.myPlayer.pos;
+        return previous.distance(pos) <= radius || current.distance(pos) <= radius;
+    }
+
+    postTick() {
+        const { InputHandler } = this.client.ownerClient;
+        const { myPlayer, _ModuleHandler: ModuleHandler } = this.client;
+        const pos1 = myPlayer.pos.current;
+        const walkPos = this.getActualPosition();
+
+        // Aim at enemy when in combat, else aim at cursor
+        const ownerEnemy = this.client.ownerClient.EnemyManager.nearestEnemy;
+        if (ownerEnemy !== null && this.combatMode) {
+            ModuleHandler._currentAngle = pos1.angle(ownerEnemy.pos.current);
+        } else {
+            const lookPos = InputHandler.cursorPosition();
+            ModuleHandler._currentAngle = pos1.angle(lookPos);
+        }
+
+        const stopRadius = this.combatMode ? 55 : Settings_default._movementRadius;
+
+        if (!this.someColliding(walkPos, stopRadius)) {
+            const walkTo = pos1.angle(walkPos);
+            this.isStopped = !ModuleHandler.startMovement(walkTo);
+        } else if (!this.isStopped) {
+            this.isStopped = true;
+            ModuleHandler.stopMovement();
+        }
+    }
+}
+
+// ============================================================
+// REPLACEMENT: TempData (syncs enemy info to bots)
+// ============================================================
+class TempData {
+    moduleName = "tempData";
+    client;
+    store = [0, 0];
+    targetEnemyAngle = null;
+
+    constructor(client) { this.client = client; }
+
+    setAttacking(attacking) {
+        const { _ModuleHandler: ModuleHandler } = this.client;
+        ModuleHandler.attacking = attacking;
+        if (attacking !== 0) ModuleHandler.attackingState = attacking;
+    }
+
+    setStore(type, id) {
+        this.store[type] = id;
+        this.handleBuy(type);
+    }
+
+    handleBuy(type) {
+        const { _ModuleHandler: ModuleHandler } = this.client;
+        const id = this.store[type];
+        const store = ModuleHandler.store[type];
+        if (store.actual === id) return;
+        if (ModuleHandler.sentHatEquip) return;
+        const temp = ModuleHandler.canBuy(type, id) ? id : 0;
+        ModuleHandler._equip(type, temp, true);
+    }
+
+    /** Sync the owner's nearest enemy angle to this bot */
+    syncEnemyAngle() {
+        const ownerEnemy = this.client.ownerClient.EnemyManager.nearestEnemy;
+        if (ownerEnemy !== null) {
+            const ownerPos = this.client.myPlayer.pos.current;
+            this.targetEnemyAngle = ownerPos.angle(ownerEnemy.pos.current);
+        } else {
+            this.targetEnemyAngle = null;
+        }
+    }
+
+    postTick() {
+        this.handleBuy(0);
+        this.handleBuy(1);
+        this.syncEnemyAngle();
+    }
+}
+
+// ============================================================
+// REPLACEMENT: AutoBuy (more aggressive for bots)
+// ============================================================
+class AutoBuy {
+    moduleName = "autoBuy";
+    client;
+    buyIndex = 0;
+    // Prioritize combat items: booster -> bull -> soldier -> turret -> samurai -> emp -> corrupt wings -> shadow wings -> ...
+    buyList = [
+        [1, 11],  // Monkey tail (speed)
+        [0, 12],  // Booster hat
+        [0, 7],   // Bull helmet
+        [0, 6],   // Soldier helmet
+        [0, 53],  // Turret gear
+        [1, 21],  // Corrupt wings
+        [0, 11],  // Spike gear
+        [1, 19],  // Shadow wings
+        [0, 20],  // Samurai armor
+        [0, 15],  // Winter cap
+        [0, 31],  // Flipper hat
+        [0, 22],  // Emp helmet
+        [0, 40],  // Tank gear
+        [1, 16],  // Sawblade (passive spike dmg)
+        [0, 58],  // Dark knight (lifesteal)
+        [0, 56],  // Assassin gear
+        [0, 55],  // Bloodthirster
+    ];
+
+    constructor(client) { this.client = client; }
+
+    boughtEverything() {
+        return this.buyIndex >= this.buyList.length;
+    }
+
+    postTick() {
+        const { _ModuleHandler: ModuleHandler, myPlayer } = this.client;
+        if (this.boughtEverything() || !myPlayer.isSandbox) return;
+
+        const [type, id] = this.buyList[this.buyIndex];
+        if (ModuleHandler.canBuy(type, id)) {
+            ModuleHandler._buy(type, id);
+        }
+        if (ModuleHandler.bought[type].has(id)) {
+            this.buyIndex += 1;
+        }
+    }
+}
+
+// ============================================================
+// REPLACEMENT: ClanJoiner (faster + handles kick/rejoin)
+// ============================================================
+class ClanJoiner {
+    moduleName = "clanJoiner";
+    client;
+    joinCount = 0;
+    prevState = false;
+    rejoinDelay = 0;
+
+    constructor(client) { this.client = client; }
+
+    postTick() {
+        const { myPlayer, PacketManager, ownerClient: owner, PlayerManager } = this.client;
+        const ownerClan = owner.myPlayer.clanName;
+        const myClan = myPlayer.clanName;
+        const state = ownerClan !== myClan;
+
+        if (this.prevState !== state) {
+            this.prevState = state;
+            this.joinCount = 0;
+        }
+
+        if (this.rejoinDelay > 0) {
+            this.rejoinDelay--;
+            return;
+        }
+
+        if (ownerClan === null || myClan === ownerClan || !PlayerManager.clanExist(ownerClan)) return;
+
+        if (this.joinCount >= 2) { // reduced from 4 for faster joining
+            this.joinCount = 0;
+            if (myClan !== null) {
+                PacketManager.leaveClan();
+                this.rejoinDelay = 3;
+            } else if (!owner.pendingJoins.has(myPlayer.id)) {
+                owner.pendingJoins.add(myPlayer.id);
+                PacketManager.joinClan(ownerClan);
+            }
+            return;
+        }
+        this.joinCount++;
+    }
+}
+
+// ============================================================
+// NEW CLASS: BotRole — assigns each bot a combat role
+// ============================================================
+class BotRole {
+    moduleName = "botRole";
+    client;
+    role = "attacker"; // "attacker" | "shielder" | "placer"
+
+    constructor(client) { this.client = client; }
+
+    determineRole() {
+        if (Settings_default._botRole !== "auto") {
+            this.role = Settings_default._botRole;
+            return;
+        }
+        const owner = this.client.ownerClient;
+        const botIndex = owner.getClientIndex(this.client);
+        const totalBots = owner.clients.size;
+
+        // First bot = placer (drops traps/spikes)
+        // Last bot (if >=2) = shielder when owner is in danger
+        // Rest = attackers
+        if (totalBots >= 3 && botIndex === 0) {
+            this.role = "placer";
+        } else if (totalBots >= 2 && botIndex === totalBots - 1
+            && owner.EnemyManager.detectedDangerEnemy) {
+            this.role = "shielder";
+        } else {
+            this.role = "attacker";
+        }
+    }
+
+    postTick() {
+        this.determineRole();
+    }
+}
+
+// ============================================================
+// NEW CLASS: BotCombat — core active combat AI for bots
+// ============================================================
+class BotCombat {
+    moduleName = "botCombat";
+    client;
+    turretPending = false;
+    attackTick = 0;
+
+    constructor(client) { this.client = client; }
+
+    /** Stagger bot attacks so they don't all fire the same tick */
+    getAttackOffset() {
+        const owner = this.client.ownerClient;
+        const index = owner.getClientIndex(this.client);
+        return index * Settings_default._botAttackDelay;
+    }
+
+    postTick() {
+        if (!Settings_default._botCombatMode) {
+            this.turretPending = false;
+            return;
+        }
+
+        const { _ModuleHandler: ModuleHandler, myPlayer } = this.client;
+        const ownerEnemy = this.client.ownerClient.EnemyManager.nearestEnemy;
+        const { reloading } = ModuleHandler.staticModules;
+        const { botRole } = ModuleHandler.staticModules;
+
+        // Shielder role: hold shield toward enemy
+        if (botRole.role === "shielder") {
+            const secondary = myPlayer.getItemByType(1);
+            if (secondary === 11 && ownerEnemy !== null) {
+                const pos1 = myPlayer.pos.current;
+                const pos2 = ownerEnemy.pos.current;
+                ModuleHandler.forceWeapon = 1;
+                ModuleHandler.useAngle = pos1.angle(pos2);
+                ModuleHandler.shouldAttack = true;
+            }
+            return;
+        }
+
+        // Turret follow-up: fire turret hat after primary attack
+        if (this.turretPending) {
+            this.turretPending = false;
+            if (reloading.isReloaded(2) && ModuleHandler.canBuy(0, 53)
+                && Settings_default._botTurretAssist) {
+                ModuleHandler.moduleActive = true;
+                ModuleHandler.forceHat = 53;
+            }
+            return;
+        }
+
+        if (ModuleHandler.moduleActive || ownerEnemy === null) return;
+
+        // Respect attack stagger offset
+        this.attackTick++;
+        if (this.attackTick % Math.max(1, this.getAttackOffset() + 1) !== 0) return;
+
+        const pos1 = myPlayer.pos.current;
+        const pos2 = ownerEnemy.pos.current;
+        const primary = myPlayer.getItemByType(0);
+        if (primary === null) return;
+
+        const primaryReloaded = reloading.isReloaded(0);
+        const range = DataHandler_default.getWeapon(primary).range + ownerEnemy.hitScale;
+
+        if (!primaryReloaded || !myPlayer.collidingSimple(ownerEnemy, range)) return;
+
+        const angle = pos1.angle(pos2);
+        ModuleHandler.moduleActive = true;
+        ModuleHandler.useAngle = angle;
+        ModuleHandler.forceHat = 7; // Bull for max damage
+        ModuleHandler.forceWeapon = 0;
+        ModuleHandler.shouldAttack = true;
+
+        // Queue turret hat follow-up
+        if (ModuleHandler.canBuy(0, 53) && Settings_default._botTurretAssist) {
+            this.turretPending = true;
+        }
+    }
+}
+
+// ============================================================
+// NEW CLASS: BotCoordinate — sync bot attacks with owner
+// ============================================================
+class BotCoordinate {
+    moduleName = "botCoordinate";
+    client;
+    firedTurret = false;
+
+    constructor(client) { this.client = client; }
+
+    postTick() {
+        if (!Settings_default._botCoordinateAttacks) return;
+
+        const { _ModuleHandler: ModuleHandler, myPlayer } = this.client;
+        const owner = this.client.ownerClient;
+        const ownerMod = owner._ModuleHandler;
+        const ownerEnemy = owner.EnemyManager.nearestEnemy;
+
+        if (ModuleHandler.moduleActive || ownerEnemy === null) {
+            this.firedTurret = false;
+            return;
+        }
+
+        const { reloading } = ModuleHandler.staticModules;
+
+        // If owner just attacked: fire turret at same target
+        if (ownerMod.attacked && !this.firedTurret) {
+            this.firedTurret = true;
+            if (reloading.isReloaded(2) && ModuleHandler.canBuy(0, 53)) {
+                const pos1 = myPlayer.pos.current;
+                const pos2 = ownerEnemy.pos.current;
+                ModuleHandler.moduleActive = true;
+                ModuleHandler.forceHat = 53;
+                ModuleHandler.useAngle = pos1.angle(pos2);
+                return;
+            }
+        }
+
+        if (!ownerMod.attacked) this.firedTurret = false;
+
+        // Velocity tick assist: if owner is setting up velocity tick,
+        // bot hammers the enemy simultaneously for extra knockback
+        const ownerVelTick = owner.EnemyManager.velocityTickThreat;
+        if (ownerVelTick) {
+            const secondary = myPlayer.getItemByType(1);
+            const pos1 = myPlayer.pos.current;
+            const pos2 = ownerEnemy.pos.current;
+            if (secondary !== null && DataHandler_default.isMelee(secondary)
+                && reloading.isReloaded(1)
+                && myPlayer.collidingSimple(ownerEnemy,
+                    DataHandler_default.getWeapon(secondary).range + ownerEnemy.hitScale)) {
+                ModuleHandler.moduleActive = true;
+                ModuleHandler.useAngle = pos1.angle(pos2);
+                ModuleHandler.forceWeapon = 1;
+                ModuleHandler.shouldAttack = true;
+            }
+        }
+    }
+}
+
+// ============================================================
+// NEW CLASS: BotPlacement — bots place traps/spikes in combat
+// ============================================================
+class BotPlacement {
+    moduleName = "botPlacement";
+    client;
+
+    constructor(client) { this.client = client; }
+
+    postTick() {
+        if (!Settings_default._botSpikeAssist) return;
+
+        const { _ModuleHandler: ModuleHandler, myPlayer, ObjectManager } = this.client;
+        const { botRole } = ModuleHandler.staticModules;
+
+        if (ModuleHandler.placedOnce) return;
+        // Only the designated placer bot places aggressively
+        if (botRole.role !== "placer" && botRole.role !== "auto") return;
+
+        const ownerEnemy = this.client.ownerClient.EnemyManager.nearestEnemy;
+        if (ownerEnemy === null) return;
+
+        const pos1 = myPlayer.pos.current;
+        const pos2 = ownerEnemy.pos.current;
+        const dist = pos1.distance(pos2);
+
+        if (dist > Settings_default._autoplacerRadius) return;
+
+        const angleToEnemy = pos1.angle(pos2);
+
+        // Try spike placement first
+        if (myPlayer.canPlace(4)) {
+            const spikeID = myPlayer.getItemByType(4);
+            const angles = ObjectManager.getBestPlacementAngles({
+                position: pos1,
+                id: spikeID,
+                targetAngle: angleToEnemy,
+                ignoreID: null,
+                preplace: true,
+                reduce: true,
+                fill: true,
+            });
+            if (angles.length > 0) {
+                for (const angle of angles.slice(0, 2)) {
+                    ModuleHandler.place(4, angle);
+                }
+                ModuleHandler.placedOnce = true;
+                return;
+            }
+        }
+
+        // Fall back to trap placement if enemy is close
+        if (dist < 150 && myPlayer.canPlace(7)) {
+            const trapAngles = ObjectManager.getBestPlacementAngles({
+                position: pos1,
+                id: myPlayer.getItemByType(7),
+                targetAngle: angleToEnemy,
+                ignoreID: null,
+                preplace: true,
+                reduce: true,
+                fill: true,
+            });
+            if (trapAngles.length > 0) {
+                ModuleHandler.place(7, trapAngles[0]);
+                ModuleHandler.placedOnce = true;
+            }
+        }
+    }
+}
+
+// ============================================================
+// NEW CLASS: BotRetreat — bots retreat when low HP
+// ============================================================
+class BotRetreat {
+    moduleName = "botRetreat";
+    client;
+
+    constructor(client) { this.client = client; }
+
+    postTick() {
+        const { myPlayer, _ModuleHandler: ModuleHandler } = this.client;
+        const hpPct = myPlayer.currentHealth / myPlayer.maxHealth * 100;
+
+        if (hpPct > Settings_default._botRetreatHP) return;
+
+        // Force heal if possible
+        if (myPlayer.canPlace(2) && !ModuleHandler.healedOnce) {
+            ModuleHandler.heal();
+            ModuleHandler.healedOnce = true;
+        }
+
+        // Disable combat modules while retreating
+        ModuleHandler.moduleActive = false; // allow movement to take over
+    }
+}
+
+// ============================================================
+// MODIFIED: ModuleHandler botModules array
+// Find: this.botModules = [ ... ];
+// Replace the ENTIRE array with this:
+// ============================================================
+/*
+this.botModules = [
+    this.staticModules.botRole,
+    this.staticModules.botRetreat,
+    this.staticModules.tempData,
+    this.staticModules.clanJoiner,
+    this.staticModules.movement,
+    this.staticModules.botPlacement,
+    this.staticModules.botCombat,
+    this.staticModules.botCoordinate,
+];
+*/
+
+// ============================================================
+// MODIFIED: ModuleHandler staticModules object
+// In the staticModules = { ... } block, ADD these lines
+// alongside the existing ones:
+// ============================================================
+/*
+    botRole: new BotRole(client),
+    botRetreat: new BotRetreat(client),
+    botCombat: new BotCombat(client),
+    botCoordinate: new BotCoordinate(client),
+    botPlacement: new BotPlacement(client),
+*/
+
+// ============================================================
+// REPLACEMENT: Bots_default HTML string
+// Find: const Bots_default = '...'
+// Replace entirely with this:
+// ============================================================
+const Bots_default_IMPROVED = `<div class="menu-page" data-id="5">
+    <div class="page-title">Bots</div>
+    <p class="page-description">Create bots, control them and dominate the entire server</p>
+
+    <!-- Combat AI -->
+    <div class="section">
+        <div class="section-title">Combat AI</div>
+        <div class="section-content">
+            <div class="content-option">
+                <span class="option-title">Combat Mode</span>
+                <label class="switch-checkbox">
+                    <input id="_botCombatMode" type="checkbox"></input>
+                    <span></span>
+                </label>
+                <span class="option-description">Bots actively attack the nearest enemy</span>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Flank Mode</span>
+                <label class="switch-checkbox">
+                    <input id="_botFlankMode" type="checkbox"></input>
+                    <span></span>
+                </label>
+                <span class="option-description">Bots surround and flank enemies instead of stacking on the owner</span>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Flank Distance</span>
+                <label class="slider">
+                    <span class="slider-value"></span>
+                    <input id="_botFlankDistance" type="range" step="5" min="55" max="150">
+                </label>
+                <span class="option-description">Distance bots keep from the target enemy (weapon range = ~70-120)</span>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Turret Assist</span>
+                <label class="switch-checkbox">
+                    <input id="_botTurretAssist" type="checkbox"></input>
+                    <span></span>
+                </label>
+                <span class="option-description">Bots fire turret hats after primary attacks for bonus damage</span>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Coordinate Attacks</span>
+                <label class="switch-checkbox">
+                    <input id="_botCoordinateAttacks" type="checkbox"></input>
+                    <span></span>
+                </label>
+                <span class="option-description">Bots fire turrets when owner attacks to synchronise damage</span>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Spike / Trap Assist</span>
+                <label class="switch-checkbox">
+                    <input id="_botSpikeAssist" type="checkbox"></input>
+                    <span></span>
+                </label>
+                <span class="option-description">Dedicated placer bot places spikes and traps around enemies</span>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Attack Stagger (ticks)</span>
+                <label class="slider">
+                    <span class="slider-value"></span>
+                    <input id="_botAttackDelay" type="range" step="1" min="0" max="3">
+                </label>
+                <span class="option-description">Offset bot attacks by N ticks to avoid all hitting simultaneously</span>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Retreat below HP %</span>
+                <label class="slider">
+                    <span class="slider-value"></span>
+                    <input id="_botRetreatHP" type="range" step="5" min="0" max="60">
+                </label>
+                <span class="option-description">Bots retreat toward owner and heal when HP drops this low</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Controller -->
+    <div class="section">
+        <div class="section-title">Controller</div>
+        <div class="section-content">
+            <div class="content-option">
+                <span class="option-title">Follow cursor</span>
+                <label class="switch-checkbox">
+                    <input id="_followCursor" type="checkbox"></input>
+                    <span></span>
+                </label>
+                <span class="option-description">Bots follow your cursor instead of character</span>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Stop movement radius</span>
+                <label class="slider">
+                    <span class="slider-value"></span>
+                    <input id="_movementRadius" type="range" step="25" min="25" max="250">
+                </label>
+                <span class="option-description">Bots stop moving within this radius of the target</span>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Circle formation</span>
+                <label class="switch-checkbox">
+                    <input id="_circleFormation" type="checkbox"></input>
+                    <span></span>
+                </label>
+                <span class="option-description">Bots form a circle around you when not in combat</span>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Circle rotation</span>
+                <label class="switch-checkbox">
+                    <input id="_circleRotation" type="checkbox"></input>
+                    <span></span>
+                </label>
+                <span class="option-description">Bots orbit around you</span>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Circle radius</span>
+                <label class="slider">
+                    <span class="slider-value"></span>
+                    <input id="_circleRadius" type="range" step="25" min="50" max="600">
+                </label>
+            </div>
+            <div class="content-option">
+                <span class="option-title">Lock bot position</span>
+                <button id="_lockBotPosition" class="hotkeyInput"></button>
+                <span class="option-description">Lock bots to your last cursor position</span>
+            </div>
+        </div>
+
+        <div id="bot-container" class="section-content"></div>
+        <div class="content-option centered">
+            <button id="add-bot" class="option-button">Add Bot</button>
+        </div>
+    </div>
+</div>`;
+
+// ============================================================
+// QUICK INTEGRATION GUIDE
+// ============================================================
+/*
+STEP 1 — defaultSettings additions:
+  Add BOT_SETTING_ADDITIONS entries alongside the existing settings.
+
+STEP 2 — Replace these classes:
+  - Movement      →  the Movement class above
+  - TempData      →  the TempData class above
+  - AutoBuy       →  the AutoBuy class above
+  - ClanJoiner    →  the ClanJoiner class above
+
+STEP 3 — Add these new classes (before ModuleHandler):
+  - BotRole
+  - BotRetreat
+  - BotCombat
+  - BotCoordinate
+  - BotPlacement
+
+STEP 4 — In ModuleHandler constructor, update staticModules to add:
+    botRole: new BotRole(client),
+    botRetreat: new BotRetreat(client),
+    botCombat: new BotCombat(client),
+    botCoordinate: new BotCoordinate(client),
+    botPlacement: new BotPlacement(client),
+
+STEP 5 — Replace botModules array with:
+    this.botModules = [
+        this.staticModules.botRole,
+        this.staticModules.botRetreat,
+        this.staticModules.tempData,
+        this.staticModules.clanJoiner,
+        this.staticModules.movement,
+        this.staticModules.botPlacement,
+        this.staticModules.botCombat,
+        this.staticModules.botCoordinate,
+    ];
+
+STEP 6 — Replace Bots_default string with Bots_default_IMPROVED.
+
+SUMMARY OF BOT IMPROVEMENTS:
+  ✓ Bots actively attack the owner's nearest enemy (BotCombat)
+  ✓ Bots flank/surround enemies evenly instead of clumping (Movement)
+  ✓ Bots fire turret hats after attacks for bonus damage (BotCombat)
+  ✓ Bots sync turret fire with owner's attacks (BotCoordinate)
+  ✓ Dedicated placer bot drops spikes/traps (BotPlacement)
+  ✓ Bots retreat and heal when low HP (BotRetreat)
+  ✓ Role system: attacker / shielder / placer (BotRole)
+  ✓ Attack stagger: bots don't all fire the same tick (BotCombat)
+  ✓ Faster clan joining (ClanJoiner)
+  ✓ Better purchase order: combat gear first (AutoBuy)
+  ✓ Enemy angle synced to bots every tick (TempData)
+  ✓ All new settings have UI sliders/toggles in the Bots menu
+*/

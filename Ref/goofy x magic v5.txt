@@ -7,6 +7,7 @@
 // @require      -
 // @run-at       document-end
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // @icon         https://images-ext-2.discordapp.net/external/vBlbQJ5-5bSkX0gXQJFjkv5Oxf5C-40ir2vtCAq2bVY/%3Fwidth%3D200%26height%3D200/https/media.discordapp.net/attachments/812104700274540575/812721615820947526/discord-3.gif
 // ==/UserScript==
 

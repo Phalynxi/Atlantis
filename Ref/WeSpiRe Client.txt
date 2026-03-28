@@ -5,6 +5,7 @@
 // @license      MIT
 // @match        https://sandbox.moomoo.io/
 // @grant        none
+// @require     https://update.greasyfork.org/scripts/423602/1005014/msgpack.js
 // @version 0.0.1.20230625201521
 // @namespace https://greasyfork.org/users/1072528
 // ==/UserScript==
