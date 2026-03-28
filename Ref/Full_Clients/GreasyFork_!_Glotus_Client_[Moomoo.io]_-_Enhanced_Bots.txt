@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name            ! Glotus Client [Moomoo.io] - Enhanced Bots
+// @name            ! Glotus Client [Moomoo.io] - Enhanced Bots [Patched by Atlantis]
 // @author          Murka (original), Enhanced Bot System
 // @description     Glotus Client with significantly improved bot 
 // @icon            https://i.imgur.com/rlMQW2P.png

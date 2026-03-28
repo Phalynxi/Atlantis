@@ -55,8 +55,8 @@ Customizable autoheal
 */
 // Setup info
 const MooMoo = (function MooMooJS_beta() {})[69];
-let activePlayerManager = MooMoo.ActivePlayerManager;
-let players = activePlayerManager.players;
+let activePlayerManager = MooMoo?.ActivePlayerManager;
+let players = activePlayerManager?.players || [];
 
 // Instakill:
 
@@ -64,48 +64,48 @@ var autoinsta = false;
 var instaType = 1
 
 function Equip(id, type) {
-    MooMoo.sendPacket("13c" , 0, id, type)
+    MooMoo?.sendPacket("13c" , 0, id, type)
 }
 var isReloaded = true
 
 function instaMusket1() {
-    let nearestEnemyAngle = activePlayerManager.getClosestEnemyAngle();
-    MooMoo.sendPacket("c", 0, null)
+    let nearestEnemyAngle = activePlayerManager?.getClosestEnemyAngle?.() || 0;
+    MooMoo?.sendPacket("c", 0, null)
     isReloaded = false
-    let primary = MooMoo.myPlayer.inventory.primary;
-    MooMoo.sendPacket("13c" , 0, 7, 0)
-    MooMoo.sendPacket("13c", 0, 0, 1)
-    MooMoo.sendPacket("13c", 0, 21, 1)
-    MooMoo.sendPacket("5", MooMoo.myPlayer.inventory.primary, true);
-    MooMoo.myPlayer.hit(nearestEnemyAngle);
+    let primary = MooMoo?.myPlayer.inventory.primary;
+    MooMoo?.sendPacket("13c" , 0, 7, 0)
+    MooMoo?.sendPacket("13c", 0, 0, 1)
+    MooMoo?.sendPacket("13c", 0, 21, 1)
+    MooMoo?.sendPacket("5", MooMoo?.myPlayer.inventory.primary, true);
+    MooMoo?.myPlayer.hit(nearestEnemyAngle);
 }
 
 function instaMusket2() {
-    let secondary = MooMoo.myPlayer.inventory.secondary;
+    let secondary = MooMoo?.myPlayer.inventory.secondary;
     setTimeout(() => {
-        MooMoo.sendPacket("13c", 0, 53, 0)
-        MooMoo.sendPacket("5", MooMoo.myPlayer.inventory.secondary, true);
-        let nearestEnemyAngle = activePlayerManager.getClosestEnemyAngle();
-        MooMoo.myPlayer.hit(nearestEnemyAngle);
+        MooMoo?.sendPacket("13c", 0, 53, 0)
+        MooMoo?.sendPacket("5", MooMoo?.myPlayer.inventory.secondary, true);
+        let nearestEnemyAngle = activePlayerManager?.getClosestEnemyAngle?.() || 0;
+        MooMoo?.myPlayer.hit(nearestEnemyAngle);
     }, 75);
     setTimeout(() => {
-        MooMoo.sendPacket("13c", 0, 6, 0)
+        MooMoo?.sendPacket("13c", 0, 6, 0)
     }, 150)
 }
 
 function instaMusketReload() {
-    let primary = MooMoo.myPlayer.inventory.primary;
-    let secondary = MooMoo.myPlayer.inventory.secondary;
+    let primary = MooMoo?.myPlayer.inventory.primary;
+    let secondary = MooMoo?.myPlayer.inventory.secondary;
     setTimeout(() => {
-        MooMoo.sendPacket("5", MooMoo.myPlayer.inventory.secondary, true);
+        MooMoo?.sendPacket("5", MooMoo?.myPlayer.inventory.secondary, true);
     }, 300);
     setTimeout(() => {
-        MooMoo.sendPacket("5", MooMoo.myPlayer.inventory.primary, true);
+        MooMoo?.sendPacket("5", MooMoo?.myPlayer.inventory.primary, true);
     }, 2500);
     setTimeout(() => {
-        MooMoo.sendPacket("13c", 0, 12, 0)
-        MooMoo.sendPacket("13c", 0, 0, 1)
-        MooMoo.sendPacket("13c", 0, 11, 1)
+        MooMoo?.sendPacket("13c", 0, 12, 0)
+        MooMoo?.sendPacket("13c", 0, 0, 1)
+        MooMoo?.sendPacket("13c", 0, 11, 1)
     }, 3500);
     setTimeout(() => {
         isReloaded = true
@@ -113,39 +113,39 @@ function instaMusketReload() {
 }
 
 function instaSpike1() {
-    MooMoo.sendPacket("c", 0, null)
+    MooMoo?.sendPacket("c", 0, null)
     isReloaded = false
-    let primary = MooMoo.myPlayer.inventory.primary;
-    MooMoo.sendPacket("13c" , 0, 7, 0)
-    MooMoo.sendPacket("13c", 0, 0, 1)
-    MooMoo.sendPacket("13c", 0, 21, 1)
-    MooMoo.sendPacket("5", MooMoo.myPlayer.inventory.primary, true);
-    let nearestEnemyAngle = activePlayerManager.getClosestEnemyAngle();
-    MooMoo.myPlayer.hit(nearestEnemyAngle);
+    let primary = MooMoo?.myPlayer.inventory.primary;
+    MooMoo?.sendPacket("13c" , 0, 7, 0)
+    MooMoo?.sendPacket("13c", 0, 0, 1)
+    MooMoo?.sendPacket("13c", 0, 21, 1)
+    MooMoo?.sendPacket("5", MooMoo?.myPlayer.inventory.primary, true);
+    let nearestEnemyAngle = activePlayerManager?.getClosestEnemyAngle?.() || 0;
+    MooMoo?.myPlayer.hit(nearestEnemyAngle);
 }
 
 function instaSpike2() {
     setTimeout(() => {
-        MooMoo.sendPacket("13c", 0, 53, 0)
-        let spike = MooMoo.myPlayer.inventory.spike;
-        let nearestEnemyAngle = activePlayerManager.getClosestEnemyAngle();
-        MooMoo.myPlayer.place(spike, nearestEnemyAngle + anglechange(35));
-        MooMoo.myPlayer.place(spike, nearestEnemyAngle + anglechange(315));
+        MooMoo?.sendPacket("13c", 0, 53, 0)
+        let spike = MooMoo?.myPlayer.inventory.spike;
+        let nearestEnemyAngle = activePlayerManager?.getClosestEnemyAngle?.() || 0;
+        MooMoo?.myPlayer.place(spike, nearestEnemyAngle + anglechange(35));
+        MooMoo?.myPlayer.place(spike, nearestEnemyAngle + anglechange(315));
     }, 100);
     setTimeout(() => {
-        MooMoo.sendPacket("13c", 0, 6, 0)
+        MooMoo?.sendPacket("13c", 0, 6, 0)
     }, 150)
 }
 
 function instaSpikeReload() {
-    let primary = MooMoo.myPlayer.inventory.primary;
+    let primary = MooMoo?.myPlayer.inventory.primary;
     setTimeout(() => {
-        MooMoo.sendPacket("5", MooMoo.myPlayer.inventory.primary, true);
+        MooMoo?.sendPacket("5", MooMoo?.myPlayer.inventory.primary, true);
     }, 200);
     setTimeout(() => {
-        MooMoo.sendPacket("13c" , 0, 7, 0)
-        MooMoo.sendPacket("13c", 0, 0, 1)
-        MooMoo.sendPacket("13c", 0, 21, 1)
+        MooMoo?.sendPacket("13c" , 0, 7, 0)
+        MooMoo?.sendPacket("13c", 0, 0, 1)
+        MooMoo?.sendPacket("13c", 0, 21, 1)
     }, 500);
     setTimeout(() => {
         isReloaded = true
@@ -155,96 +155,96 @@ function instaSpikeReload() {
 // Normal hotkeys
 
 function HoldSpike() {
-    let myPlayer = MooMoo.myPlayer;
-    MooMoo.sendPacket("5", MooMoo.myPlayer.inventory.spike, false)
+    let myPlayer = MooMoo?.myPlayer;
+    MooMoo?.sendPacket("5", MooMoo?.myPlayer.inventory.spike, false)
 }
 function HoldTrap() {
-    let myPlayer = MooMoo.myPlayer;
-    MooMoo.sendPacket("5", MooMoo.myPlayer.inventory.trap, false)
+    let myPlayer = MooMoo?.myPlayer;
+    MooMoo?.sendPacket("5", MooMoo?.myPlayer.inventory.trap, false)
 }
 function HoldTeleport() {
-    let myPlayer = MooMoo.myPlayer;
-    MooMoo.sendPacket("5", MooMoo.myPlayer.inventory.turret, false)
+    let myPlayer = MooMoo?.myPlayer;
+    MooMoo?.sendPacket("5", MooMoo?.myPlayer.inventory.turret, false)
 }
 function anglechange(angle) {
     return angle * 0.01745329251;
 }
 // Hacked hotkeys
 function QuadSpike() {
-    let myPlayer = MooMoo.myPlayer;
-    let spike = MooMoo.myPlayer.inventory.spike;
-    MooMoo.myPlayer.place(spike, myPlayer.dir + anglechange(0));
-    MooMoo.myPlayer.place(spike, myPlayer.dir + anglechange(90));
-    MooMoo.myPlayer.place(spike, myPlayer.dir + anglechange(180));
-    MooMoo.myPlayer.place(spike, myPlayer.dir + anglechange(270));
+    let myPlayer = MooMoo?.myPlayer;
+    let spike = MooMoo?.myPlayer.inventory.spike;
+    MooMoo?.myPlayer.place(spike, myPlayer.dir + anglechange(0));
+    MooMoo?.myPlayer.place(spike, myPlayer.dir + anglechange(90));
+    MooMoo?.myPlayer.place(spike, myPlayer.dir + anglechange(180));
+    MooMoo?.myPlayer.place(spike, myPlayer.dir + anglechange(270));
 }
 
 function QuadBoost() {
-    let myPlayer = MooMoo.myPlayer;
-    let Boost = MooMoo.myPlayer.inventory.boostPad;
-    MooMoo.myPlayer.place(Boost, myPlayer.dir + anglechange(0));
-    MooMoo.myPlayer.place(Boost, myPlayer.dir + anglechange(90));
-    MooMoo.myPlayer.place(Boost, myPlayer.dir + anglechange(180));
-    MooMoo.myPlayer.place(Boost, myPlayer.dir + anglechange(270));
+    let myPlayer = MooMoo?.myPlayer;
+    let Boost = MooMoo?.myPlayer.inventory.boostPad;
+    MooMoo?.myPlayer.place(Boost, myPlayer.dir + anglechange(0));
+    MooMoo?.myPlayer.place(Boost, myPlayer.dir + anglechange(90));
+    MooMoo?.myPlayer.place(Boost, myPlayer.dir + anglechange(180));
+    MooMoo?.myPlayer.place(Boost, myPlayer.dir + anglechange(270));
 }
 var millDir = "null"
 function TripMill() {
-    let myPlayer = MooMoo.myPlayer;
-    let mill = MooMoo.myPlayer.inventory.mill
+    let myPlayer = MooMoo?.myPlayer;
+    let mill = MooMoo?.myPlayer.inventory.mill
     if (millDir == "A") {
-        MooMoo.myPlayer.place(mill, anglechange(0));
-        MooMoo.myPlayer.place(mill, anglechange(90));
-        MooMoo.myPlayer.place(mill, anglechange(270));
+        MooMoo?.myPlayer.place(mill, anglechange(0));
+        MooMoo?.myPlayer.place(mill, anglechange(90));
+        MooMoo?.myPlayer.place(mill, anglechange(270));
     }
     if (millDir == "S") {
-        MooMoo.myPlayer.place(mill, anglechange(0));
-        MooMoo.myPlayer.place(mill, anglechange(180));
-        MooMoo.myPlayer.place(mill, anglechange(270));
+        MooMoo?.myPlayer.place(mill, anglechange(0));
+        MooMoo?.myPlayer.place(mill, anglechange(180));
+        MooMoo?.myPlayer.place(mill, anglechange(270));
     }
     if (millDir == "W") {
-        MooMoo.myPlayer.place(mill, anglechange(0));
-        MooMoo.myPlayer.place(mill, anglechange(90));
-        MooMoo.myPlayer.place(mill, anglechange(180));
+        MooMoo?.myPlayer.place(mill, anglechange(0));
+        MooMoo?.myPlayer.place(mill, anglechange(90));
+        MooMoo?.myPlayer.place(mill, anglechange(180));
     }
     if (millDir == "D") {
-        MooMoo.myPlayer.place(mill, anglechange(90));
-        MooMoo.myPlayer.place(mill, anglechange(180));
-        MooMoo.myPlayer.place(mill, anglechange(270));
+        MooMoo?.myPlayer.place(mill, anglechange(90));
+        MooMoo?.myPlayer.place(mill, anglechange(180));
+        MooMoo?.myPlayer.place(mill, anglechange(270));
     }
 }
 
 function QuadTurret() {
-    let myPlayer = MooMoo.myPlayer;
-    let Turret = MooMoo.myPlayer.inventory.turret;
-    MooMoo.myPlayer.place(Turret, myPlayer.dir + anglechange(0));
-    MooMoo.myPlayer.place(Turret, myPlayer.dir + anglechange(90));
-    MooMoo.myPlayer.place(Turret, myPlayer.dir + anglechange(180));
-    MooMoo.myPlayer.place(Turret, myPlayer.dir + anglechange(270));
+    let myPlayer = MooMoo?.myPlayer;
+    let Turret = MooMoo?.myPlayer.inventory.turret;
+    MooMoo?.myPlayer.place(Turret, myPlayer.dir + anglechange(0));
+    MooMoo?.myPlayer.place(Turret, myPlayer.dir + anglechange(90));
+    MooMoo?.myPlayer.place(Turret, myPlayer.dir + anglechange(180));
+    MooMoo?.myPlayer.place(Turret, myPlayer.dir + anglechange(270));
 }
 
 function MiniBoostSpike() {
-    let myPlayer = MooMoo.myPlayer;
-    let spike = MooMoo.myPlayer.inventory.spike;
-    let Boost = MooMoo.myPlayer.inventory.boostPad;
-    let nearestEnemyAngle = activePlayerManager.getClosestEnemyAngle();
-    let nearestEnemyDistance = activePlayerManager.getClosestEnemyDistance();
-    MooMoo.myPlayer.place(Boost, nearestEnemyAngle, anglechange(0));
+    let myPlayer = MooMoo?.myPlayer;
+    let spike = MooMoo?.myPlayer.inventory.spike;
+    let Boost = MooMoo?.myPlayer.inventory.boostPad;
+    let nearestEnemyAngle = activePlayerManager?.getClosestEnemyAngle?.() || 0;
+    let nearestEnemyDistance = activePlayerManager?.getClosestEnemyDistance?.() || 9999;
+    MooMoo?.myPlayer.place(Boost, nearestEnemyAngle, anglechange(0));
     setTimeout(() => {
-        MooMoo.myPlayer.place(spike, myPlayer.dir + anglechange(0));
-        MooMoo.myPlayer.place(spike, myPlayer.dir + anglechange(90));
-        MooMoo.myPlayer.place(spike, myPlayer.dir + anglechange(180));
-        MooMoo.myPlayer.place(spike, myPlayer.dir + anglechange(270));
+        MooMoo?.myPlayer.place(spike, myPlayer.dir + anglechange(0));
+        MooMoo?.myPlayer.place(spike, myPlayer.dir + anglechange(90));
+        MooMoo?.myPlayer.place(spike, myPlayer.dir + anglechange(180));
+        MooMoo?.myPlayer.place(spike, myPlayer.dir + anglechange(270));
     }, nearestEnemyDistance);
 }
 
 function BoostSpike() {
-    let myPlayer = MooMoo.myPlayer;
-    let spike = MooMoo.myPlayer.inventory.spike;
-    let Boost = MooMoo.myPlayer.inventory.boostPad;
-    let nearestEnemyAngle = activePlayerManager.getClosestEnemyAngle();
-    MooMoo.myPlayer.place(Boost, nearestEnemyAngle + anglechange(0));
-    MooMoo.myPlayer.place(spike, nearestEnemyAngle + anglechange(90));
-    MooMoo.myPlayer.place(spike, nearestEnemyAngle + anglechange(270));
+    let myPlayer = MooMoo?.myPlayer;
+    let spike = MooMoo?.myPlayer.inventory.spike;
+    let Boost = MooMoo?.myPlayer.inventory.boostPad;
+    let nearestEnemyAngle = activePlayerManager?.getClosestEnemyAngle?.() || 0;
+    MooMoo?.myPlayer.place(Boost, nearestEnemyAngle + anglechange(0));
+    MooMoo?.myPlayer.place(spike, nearestEnemyAngle + anglechange(90));
+    MooMoo?.myPlayer.place(spike, nearestEnemyAngle + anglechange(270));
 }
 
 // AutoFighter
@@ -254,21 +254,21 @@ var autoReplacer = false;
 var buildsNearPlayer = []
 
 function automaticFighter() {
-    let nearestEnemyDistance = activePlayerManager.getClosestEnemyDistance();
-    let myPlayer = MooMoo.myPlayer;
-    let trap = MooMoo.myPlayer.inventory.boostPad;
-    let spike = MooMoo.myPlayer.inventory.spike;
+    let nearestEnemyDistance = activePlayerManager?.getClosestEnemyDistance?.() || 9999;
+    let myPlayer = MooMoo?.myPlayer;
+    let trap = MooMoo?.myPlayer.inventory.boostPad;
+    let spike = MooMoo?.myPlayer.inventory.spike;
     setTimeout(() => {
         if (nearestEnemyDistance < 300 && nearestEnemyDistance !== null) {
             if (Traper == "spike") {
-                let nearestEnemyAngle = activePlayerManager.getClosestEnemyAngle();
-                MooMoo.myPlayer.place(spike, nearestEnemyAngle);
+                let nearestEnemyAngle = activePlayerManager?.getClosestEnemyAngle?.() || 0;
+                MooMoo?.myPlayer.place(spike, nearestEnemyAngle);
             }
         }
         if (nearestEnemyDistance < 200 && nearestEnemyDistance !== null) {
             if (Traper == "trap") {
-                let nearestEnemyAngle = activePlayerManager.getClosestEnemyAngle();
-                MooMoo.myPlayer.place(trap, nearestEnemyAngle);
+                let nearestEnemyAngle = activePlayerManager?.getClosestEnemyAngle?.() || 0;
+                MooMoo?.myPlayer.place(trap, nearestEnemyAngle);
             }
         }
     }, 200)
@@ -295,7 +295,7 @@ const setStyles = element => {
     });
 };
 const displayGameInfo = () => {
-    let myPlayer = MooMoo.myPlayer
+    let myPlayer = MooMoo?.myPlayer
     const gameInfoElement = document.createElement("div");
     setStyles(gameInfoElement);
     gameInfoElement.id = "playerPosition";
@@ -341,8 +341,8 @@ const displayGameInfo = () => {
     death.textContent = "Don't give up!";
     death.style.color = "aqua";
     const updateGameInfo = () => {
-        var nearestEnemyDistance = activePlayerManager.getClosestEnemyDistance();
-        var nearestEnemyAngle = activePlayerManager.getClosestEnemyAngle();
+        var nearestEnemyDistance = activePlayerManager?.getClosestEnemyDistance?.() || 9999;
+        var nearestEnemyAngle = activePlayerManager?.getClosestEnemyAngle?.() || 0;
         document.getElementById("playerPosition")
             .innerText = `Auto_Placer: ${(autofight)} ~ 'O'
             Auto_RePlacer: ${(autoReplacer)} ~ ']'
@@ -356,7 +356,7 @@ const displayGameInfo = () => {
         Auto_insta: ${(autoinsta)} ~ Key: [
         Insta_Type: ${(instaType)} ~ Key: BackQuote;
         -------------------------------------------------------
-        Coords: ${(Math.round(MooMoo.myPlayer.x))}, ${(Math.round(MooMoo.myPlayer.y))}
+        Coords: ${(Math.round(MooMoo?.myPlayer.x))}, ${(Math.round(MooMoo?.myPlayer.y))}
         Player2Enemy_Distance: ${(Math.round(nearestEnemyDistance))}
         Player2Enemy_Angle: ${(Math.round(nearestEnemyAngle))}`;
     };
@@ -367,7 +367,7 @@ const displayGameInfo = () => {
 
 displayGameInfo();
 MooMoo.addEventListener("loadGameObject", (data) => {
-    let myPlayer = MooMoo.myPlayer
+    let myPlayer = MooMoo?.myPlayer
     let Data = data[0]
     let Build_sid = Data[0]
     let Build_X = Data[1]
@@ -377,7 +377,7 @@ MooMoo.addEventListener("loadGameObject", (data) => {
     let Build_type = Data[5]
     let Build_ID_type = Data[6]
     let info = [`data:`, Build_sid, Build_X, Build_Y]
-    let PlayerBuild_D = MooMoo.UTILS.getDistanceBetweenTwoPoints(MooMoo.myPlayer.x, MooMoo.myPlayer.y, Build_X, Build_Y);
+    let PlayerBuild_D = MooMoo.UTILS.getDistanceBetweenTwoPoints(MooMoo?.myPlayer.x, MooMoo?.myPlayer.y, Build_X, Build_Y);
     if (PlayerBuild_D < 125) {
         buildsNearPlayer.push(info)
     }
@@ -416,15 +416,15 @@ MooMoo.addEventListener("killObject", (data) => {
             if (buildsNearPlayer[i][j] === sid) {
                 let BuildX = buildsNearPlayer[i][1]
                 let BuildY = buildsNearPlayer[i][2]
-                const buildAngle = Math.atan2(MooMoo.myPlayer.y - BuildY.y, MooMoo.myPlayer.x - BuildX.x)
-                let myPlayer = MooMoo.myPlayer
+                const buildAngle = Math.atan2(MooMoo?.myPlayer.y - BuildY.y, MooMoo?.myPlayer.x - BuildX.x)
+                let myPlayer = MooMoo?.myPlayer
                 if (Traper == "spike") {
-                    let spike = MooMoo.myPlayer.inventory.spike
-                    MooMoo.myPlayer.place(spike, buildAngle);
+                    let spike = MooMoo?.myPlayer.inventory.spike
+                    MooMoo?.myPlayer.place(spike, buildAngle);
                 }
                 if (Traper == "trap") {
-                    let trap = MooMoo.myPlayer.inventory.trap
-                    MooMoo.myPlayer.place(trap, buildAngle);
+                    let trap = MooMoo?.myPlayer.inventory.trap
+                    MooMoo?.myPlayer.place(trap, buildAngle);
                 }
                 buildsNearPlayer.splice(i, i+1)
                 break;
@@ -435,7 +435,7 @@ MooMoo.addEventListener("killObject", (data) => {
 });
 // AutoFight/insta
 MooMoo.addEventListener("updatePlayers", (data) => {
-    let nearestEnemyDistance = activePlayerManager.getClosestEnemyDistance();
+    let nearestEnemyDistance = activePlayerManager?.getClosestEnemyDistance?.() || 9999;
     if (nearestEnemyDistance < 350) {
         if (autofight == true) {
             automaticFighter();
@@ -666,14 +666,14 @@ document.addEventListener("mousedown", function(event) {
 MooMoo.addEventListener("updatehealth", (data) => {
     let sid = data[0]
     let health = data[1]
-    if (MooMoo.myPlayer.sid === sid && health < 100) {
-        let food = MooMoo.myPlayer.inventory.food;
+    if (MooMoo?.myPlayer.sid === sid && health < 100) {
+        let food = MooMoo?.myPlayer.inventory.food;
         if (isHeal == true) {
-            MooMoo.myPlayer.place(food)
+            MooMoo?.myPlayer.place(food)
         }
         if (autoheal_on == true) {
             setTimeout(() => {
-                MooMoo.myPlayer.place(food)
+                MooMoo?.myPlayer.place(food)
             }, AUTOHEAL_SPEED)
         }
     }
