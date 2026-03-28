@@ -1447,6 +1447,25 @@ display:none;
             let type = parsed[0];
             data = parsed[1];
 
+            // PACKET MAP: Convert old packet names to new ones
+            const PACKET_MAP = {
+                "33": "9",
+                "7": "K",
+                "ch": "6",
+                "pp": "0",
+                "13c": "c",
+                "f": "9",
+                "a": "9",
+                "d": "F",
+                "G": "z",
+            };
+
+            if (PACKET_MAP[type]) {
+                type = PACKET_MAP[type];
+                parsed[0] = type;
+                message = window.msgpack.encode(parsed);
+            }
+
             // SEND MESSAGE:
             if (type == "6") {
 
