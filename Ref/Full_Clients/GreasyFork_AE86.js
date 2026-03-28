@@ -18,6 +18,33 @@
 // @updateURL https://update.greasyfork.org/scripts/446982/AE86.meta.js
 // ==/UserScript==
 
+// ==Packet Override==
+const PACKET_MAP = {
+  33: "9",
+  7: "K",
+  ch: "6",
+  pp: "0",
+  "13c": "c",
+  f: "9",
+  a: "9",
+  d: "F",
+  G: "z",
+};
+
+let originalSend = WebSocket.prototype.send;
+
+WebSocket.prototype.send = new Proxy(originalSend, {
+ apply: (target, websocket, argsList) => {
+ let decoded = msgpack.decode(new Uint8Array(argsList[0]));
+ if (PACKET_MAP.hasOwnProperty(decoded[0])) {
+   decoded[0] = PACKET_MAP[decoded[0]];
+ }
+ return target.apply(websocket, [msgpack.encode(decoded)]);
+ },
+});
+// ==End Packet Override==
+
+
 let newImg2 = document.createElement("img");
     newImg2.src = "https://wc.wallpaperuse.com/wallp/15-155534_s.jpg";
     newImg2.style = `position: absolute; top: 1px; left: 5px; width: 200px; height: 200px; margin: 60px auto 0 auto; cursor: pointer;`;

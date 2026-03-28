@@ -10,6 +10,33 @@
 // @grant        none
 // ==/UserScript==
 
+// ==Packet Override==
+const PACKET_MAP = {
+  33: "9",
+  7: "K",
+  ch: "6",
+  pp: "0",
+  "13c": "c",
+  f: "9",
+  a: "9",
+  d: "F",
+  G: "z",
+};
+
+let originalSend = WebSocket.prototype.send;
+
+WebSocket.prototype.send = new Proxy(originalSend, {
+ apply: (target, websocket, argsList) => {
+ let decoded = msgpack.decode(new Uint8Array(argsList[0]));
+ if (PACKET_MAP.hasOwnProperty(decoded[0])) {
+   decoded[0] = PACKET_MAP[decoded[0]];
+ }
+ return target.apply(websocket, [msgpack.encode(decoded)]);
+ },
+});
+// ==End Packet Override==
+
+
 ((xhr, content, doc) => ((xhr = new XMLHttpRequest).open("GET", document.URL, !1), xhr.send(null), (doc = document.implementation.createHTMLDocument("" + (document.title || ""))).open(), doc.write((content = xhr.responseText)), doc.close(), [...doc.getElementsByTagName("script")].find((e => e?.src.endsWith("bundle.js")))?.remove(), document.replaceChild(document.importNode(doc.documentElement, !0), document.documentElement)))();
 
 var alphabet = "a; b; c; d; e; f; g; h; i; j; k; l; m; n; o; p; r; q; s; t; u; v; w; x; y; z; A; B; C; D; E; F; G; H; I; J; K; L; M; N; O; P; R; Q; S; T; U; V; W; Y; X; 1; 2; 3; 4; 5; 6; 7; 8; 9; 0;"

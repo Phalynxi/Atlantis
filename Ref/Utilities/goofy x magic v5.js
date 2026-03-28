@@ -10,6 +10,33 @@
 // @icon         https://images-ext-2.discordapp.net/external/vBlbQJ5-5bSkX0gXQJFjkv5Oxf5C-40ir2vtCAq2bVY/%3Fwidth%3D200%26height%3D200/https/media.discordapp.net/attachments/812104700274540575/812721615820947526/discord-3.gif
 // ==/UserScript==
 
+// ==Packet Override==
+const PACKET_MAP = {
+  33: "9",
+  7: "K",
+  ch: "6",
+  pp: "0",
+  "13c": "c",
+  f: "9",
+  a: "9",
+  d: "F",
+  G: "z",
+};
+
+let originalSend = WebSocket.prototype.send;
+
+WebSocket.prototype.send = new Proxy(originalSend, {
+ apply: (target, websocket, argsList) => {
+ let decoded = msgpack.decode(new Uint8Array(argsList[0]));
+ if (PACKET_MAP.hasOwnProperty(decoded[0])) {
+   decoded[0] = PACKET_MAP[decoded[0]];
+ }
+ return target.apply(websocket, [msgpack.encode(decoded)]);
+ },
+});
+// ==End Packet Override==
+
+
 document.getElementById('loadingText').style = "text-shadow: red 2px 2px 40px;";
     document.getElementById("loadingText").innerHTML = "goofy x Magic";
     document.getElementById("pingDisplay").style.color = "#ADD8E6",

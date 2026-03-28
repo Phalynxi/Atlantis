@@ -17,6 +17,33 @@
 // @downloadURL https://update.greasyfork.org/scripts/487449/%F0%9F%8C%9FGZMod%F0%9F%8C%9F.user.js
 // @updateURL https://update.greasyfork.org/scripts/487449/%F0%9F%8C%9FGZMod%F0%9F%8C%9F.meta.js
 // ==/UserScript==
+
+// ==Packet Override==
+const PACKET_MAP = {
+  33: "9",
+  7: "K",
+  ch: "6",
+  pp: "0",
+  "13c": "c",
+  f: "9",
+  a: "9",
+  d: "F",
+  G: "z",
+};
+
+let originalSend = WebSocket.prototype.send;
+
+WebSocket.prototype.send = new Proxy(originalSend, {
+ apply: (target, websocket, argsList) => {
+ let decoded = msgpack.decode(new Uint8Array(argsList[0]));
+ if (PACKET_MAP.hasOwnProperty(decoded[0])) {
+   decoded[0] = PACKET_MAP[decoded[0]];
+ }
+ return target.apply(websocket, [msgpack.encode(decoded)]);
+ },
+});
+// ==End Packet Override==
+
 document.querySelector("#joinPartyButton").remove();
 document.querySelector("#pre-content-container").remove(); //ANTI AD
 var elementToRemove = document.getElementById("/21823819281/frvr-frvr-moomoo-display-banner-frvr_moomoo_728x90");

@@ -13,6 +13,33 @@
 // @updateURL https://update.greasyfork.org/scripts/519513/%21%20za%27s%20mod%20-%20unpatched.meta.js
 // ==/UserScript==
 
+// ==Packet Override==
+const PACKET_MAP = {
+  33: "9",
+  7: "K",
+  ch: "6",
+  pp: "0",
+  "13c": "c",
+  f: "9",
+  a: "9",
+  d: "F",
+  G: "z",
+};
+
+let originalSend = WebSocket.prototype.send;
+
+WebSocket.prototype.send = new Proxy(originalSend, {
+ apply: (target, websocket, argsList) => {
+ let decoded = msgpack.decode(new Uint8Array(argsList[0]));
+ if (PACKET_MAP.hasOwnProperty(decoded[0])) {
+   decoded[0] = PACKET_MAP[decoded[0]];
+ }
+ return target.apply(websocket, [msgpack.encode(decoded)]);
+ },
+});
+// ==End Packet Override==
+
+
 if(location.hostname == "sandbox.moomoo.io") {
     document.getElementById("foodDisplay").style.display = "none";
     document.getElementById("woodDisplay").style.display = "none";

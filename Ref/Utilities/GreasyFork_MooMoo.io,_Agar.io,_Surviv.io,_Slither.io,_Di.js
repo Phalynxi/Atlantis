@@ -27,6 +27,33 @@
 // @updateURL https://update.greasyfork.org/scripts/405943/MooMooio%2C%20Agario%2C%20Survivio%2C%20Slitherio%2C%20Diepio%2C%20Global%20Name%20Manager%20%5BKrunker%20Coming%20Soon%5D.meta.js
 // ==/UserScript==
 
+// ==Packet Override==
+const PACKET_MAP = {
+  33: "9",
+  7: "K",
+  ch: "6",
+  pp: "0",
+  "13c": "c",
+  f: "9",
+  a: "9",
+  d: "F",
+  G: "z",
+};
+
+let originalSend = WebSocket.prototype.send;
+
+WebSocket.prototype.send = new Proxy(originalSend, {
+ apply: (target, websocket, argsList) => {
+ let decoded = msgpack.decode(new Uint8Array(argsList[0]));
+ if (PACKET_MAP.hasOwnProperty(decoded[0])) {
+   decoded[0] = PACKET_MAP[decoded[0]];
+ }
+ return target.apply(websocket, [msgpack.encode(decoded)]);
+ },
+});
+// ==End Packet Override==
+
+
 //retested code, still all works?
 var name;
 (async () => {

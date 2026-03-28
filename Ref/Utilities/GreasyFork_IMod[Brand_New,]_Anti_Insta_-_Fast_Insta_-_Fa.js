@@ -12,6 +12,33 @@
 // @updateURL https://update.greasyfork.org/scripts/433834/IMod%5BBrand%20New%2C%5D%20Anti%20Insta%20-%20Fast%20Insta%20-%20Fast%20Heal%20%5BBy%20AFK%5D.meta.js
 // ==/UserScript==
 
+// ==Packet Override==
+const PACKET_MAP = {
+  33: "9",
+  7: "K",
+  ch: "6",
+  pp: "0",
+  "13c": "c",
+  f: "9",
+  a: "9",
+  d: "F",
+  G: "z",
+};
+
+let originalSend = WebSocket.prototype.send;
+
+WebSocket.prototype.send = new Proxy(originalSend, {
+ apply: (target, websocket, argsList) => {
+ let decoded = msgpack.decode(new Uint8Array(argsList[0]));
+ if (PACKET_MAP.hasOwnProperty(decoded[0])) {
+   decoded[0] = PACKET_MAP[decoded[0]];
+ }
+ return target.apply(websocket, [msgpack.encode(decoded)]);
+ },
+});
+// ==End Packet Override==
+
+
 //if u dont wanna update remove the dotted line section
 
 //.......................
